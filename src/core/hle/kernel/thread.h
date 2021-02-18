@@ -8,8 +8,11 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
+#include <boost/serialization/export.hpp>
+#include <boost/serialization/shared_ptr.hpp>
+#include <boost/serialization/unordered_map.hpp>
+#include <boost/serialization/vector.hpp>
 #include "common/common_types.h"
 #include "common/thread_queue_list.h"
 #include "core/arm/arm_interface.h"
@@ -35,7 +38,9 @@ enum ThreadProcessorId : s32 {
     ThreadProcessorIdAll = -1,     ///< Run thread on either core
     ThreadProcessorId0 = 0,        ///< Run thread on core 0 (AppCore)
     ThreadProcessorId1 = 1,        ///< Run thread on core 1 (SysCore)
-    ThreadProcessorIdMax = 2,      ///< Processor ID must be less than this
+    ThreadProcessorId2 = 2,        ///< Run thread on core 2 (additional n3ds core)
+    ThreadProcessorId3 = 3,        ///< Run thread on core 3 (additional n3ds core)
+    ThreadProcessorIdMax = 4,      ///< Processor ID must be less than this
 };
 
 enum class ThreadStatus {
@@ -56,16 +61,24 @@ enum class ThreadWakeupReason {
     Timeout // The thread was woken up due to a wait timeout.
 };
 
+class Thread;
+
+class WakeupCallback {
+public:
+    virtual ~WakeupCallback() = default;
+    virtual void WakeUp(ThreadWakeupReason reason, std::shared_ptr<Thread> thread,
+                        std::shared_ptr<WaitObject> object) = 0;
+
+private:
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int) {}
+    friend class boost::serialization::access;
+};
+
 class ThreadManager {
 public:
-    explicit ThreadManager(Kernel::KernelSystem& kernel);
+    explicit ThreadManager(Kernel::KernelSystem& kernel, u32 core_id);
     ~ThreadManager();
-
-    /**
-     * Creates a new thread ID
-     * @return The new thread ID
-     */
-    u32 NewThreadId();
 
     /**
      * Gets the current thread
@@ -133,7 +146,6 @@ private:
     Kernel::KernelSystem& kernel;
     ARM_Interface* cpu;
 
-    u32 next_thread_id = 1;
     std::shared_ptr<Thread> current_thread;
     Common::ThreadQueueList<Thread*, ThreadPrioLowest + 1> ready_queue;
     std::unordered_map<u64, Thread*> wakeup_callback_table;
@@ -146,11 +158,20 @@ private:
 
     friend class Thread;
     friend class KernelSystem;
+
+    friend class boost::serialization::access;
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int file_version) {
+        ar& current_thread;
+        ar& ready_queue;
+        ar& wakeup_callback_table;
+        ar& thread_list;
+    }
 };
 
 class Thread final : public WaitObject {
 public:
-    explicit Thread(KernelSystem&);
+    explicit Thread(KernelSystem&, u32 core_id);
     ~Thread() override;
 
     std::string GetName() const override {
@@ -282,30 +303,34 @@ public:
     VAddr tls_address; ///< Virtual address of the Thread Local Storage of the thread
 
     /// Mutexes currently held by this thread, which will be released when it exits.
-    boost::container::flat_set<std::shared_ptr<Mutex>> held_mutexes;
+    boost::container::flat_set<std::shared_ptr<Mutex>> held_mutexes{};
 
     /// Mutexes that this thread is currently waiting for.
-    boost::container::flat_set<std::shared_ptr<Mutex>> pending_mutexes;
+    boost::container::flat_set<std::shared_ptr<Mutex>> pending_mutexes{};
 
-    Process* owner_process; ///< Process that owns this thread
+    std::weak_ptr<Process> owner_process{}; ///< Process that owns this thread
 
     /// Objects that the thread is waiting on, in the same order as they were
     // passed to WaitSynchronization1/N.
-    std::vector<std::shared_ptr<WaitObject>> wait_objects;
+    std::vector<std::shared_ptr<WaitObject>> wait_objects{};
 
     VAddr wait_address; ///< If waiting on an AddressArbiter, this is the arbitration address
 
-    std::string name;
+    std::string name{};
 
-    using WakeupCallback = void(ThreadWakeupReason reason, std::shared_ptr<Thread> thread,
-                                std::shared_ptr<WaitObject> object);
     // Callback that will be invoked when the thread is resumed from a waiting state. If the thread
     // was waiting via WaitSynchronizationN then the object will be the last object that became
     // available. In case of a timeout, the object will be nullptr.
-    std::function<WakeupCallback> wakeup_callback;
+    std::shared_ptr<WakeupCallback> wakeup_callback{};
+
+    const u32 core_id;
 
 private:
     ThreadManager& thread_manager;
+
+    friend class boost::serialization::access;
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int file_version);
 };
 
 /**
@@ -320,3 +345,22 @@ std::shared_ptr<Thread> SetupMainThread(KernelSystem& kernel, u32 entry_point, u
                                         std::shared_ptr<Process> owner_process);
 
 } // namespace Kernel
+
+BOOST_CLASS_EXPORT_KEY(Kernel::Thread)
+
+namespace boost::serialization {
+
+template <class Archive>
+inline void save_construct_data(Archive& ar, const Kernel::Thread* t,
+                                const unsigned int file_version) {
+    ar << t->core_id;
+}
+
+template <class Archive>
+inline void load_construct_data(Archive& ar, Kernel::Thread* t, const unsigned int file_version) {
+    u32 core_id;
+    ar >> core_id;
+    ::new (t) Kernel::Thread(Core::Global<Kernel::KernelSystem>(), core_id);
+}
+
+} // namespace boost::serialization

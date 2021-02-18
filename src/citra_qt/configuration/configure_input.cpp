@@ -6,13 +6,17 @@
 #include <memory>
 #include <utility>
 #include <QInputDialog>
+#include <QKeyEvent>
+#include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
+#include <QSlider>
 #include <QTimer>
 #include "citra_qt/configuration/config.h"
 #include "citra_qt/configuration/configure_input.h"
 #include "citra_qt/configuration/configure_motion_touch.h"
 #include "common/param_package.h"
+#include "ui_configure_input.h"
 
 const std::array<std::string, ConfigureInput::ANALOG_SUB_BUTTONS_NUM>
     ConfigureInput::analog_sub_buttons{{
@@ -43,7 +47,6 @@ static void SetAnalogButton(const Common::ParamPackage& input_param,
     if (analog_param.Get("engine", "") != "analog_from_button") {
         analog_param = {
             {"engine", "analog_from_button"},
-            {"modifier_scale", "0.5"},
         };
     }
     analog_param.Set(button_name, input_param.Serialize());
@@ -155,21 +158,26 @@ ConfigureInput::ConfigureInput(QWidget* parent)
     }};
 
     analog_map_stick = {ui->buttonCircleAnalog, ui->buttonCStickAnalog};
+    analog_map_deadzone_and_modifier_slider = {ui->sliderCirclePadDeadzoneAndModifier,
+                                               ui->sliderCStickDeadzoneAndModifier};
+    analog_map_deadzone_and_modifier_slider_label = {ui->labelCirclePadDeadzoneAndModifier,
+                                                     ui->labelCStickDeadzoneAndModifier};
 
     for (int button_id = 0; button_id < Settings::NativeButton::NumButtons; button_id++) {
         if (!button_map[button_id])
             continue;
         button_map[button_id]->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(button_map[button_id], &QPushButton::clicked, [=]() {
-            HandleClick(button_map[button_id],
-                        [=](const Common::ParamPackage& params) {
-                            buttons_param[button_id] = params;
-                            // If the user closes the dialog, the changes are reverted in
-                            // `GMainWindow::OnConfigure()`
-                            ApplyConfiguration();
-                            Settings::SaveProfile(ui->profile->currentIndex());
-                        },
-                        InputCommon::Polling::DeviceType::Button);
+            HandleClick(
+                button_map[button_id],
+                [=](const Common::ParamPackage& params) {
+                    buttons_param[button_id] = params;
+                    // If the user closes the dialog, the changes are reverted in
+                    // `GMainWindow::OnConfigure()`
+                    ApplyConfiguration();
+                    Settings::SaveProfile(ui->profile->currentIndex());
+                },
+                InputCommon::Polling::DeviceType::Button);
         });
         connect(button_map[button_id], &QPushButton::customContextMenuRequested,
                 [=](const QPoint& menu_location) {
@@ -198,14 +206,15 @@ ConfigureInput::ConfigureInput(QWidget* parent)
             analog_map_buttons[analog_id][sub_button_id]->setContextMenuPolicy(
                 Qt::CustomContextMenu);
             connect(analog_map_buttons[analog_id][sub_button_id], &QPushButton::clicked, [=]() {
-                HandleClick(analog_map_buttons[analog_id][sub_button_id],
-                            [=](const Common::ParamPackage& params) {
-                                SetAnalogButton(params, analogs_param[analog_id],
-                                                analog_sub_buttons[sub_button_id]);
-                                ApplyConfiguration();
-                                Settings::SaveProfile(ui->profile->currentIndex());
-                            },
-                            InputCommon::Polling::DeviceType::Button);
+                HandleClick(
+                    analog_map_buttons[analog_id][sub_button_id],
+                    [=](const Common::ParamPackage& params) {
+                        SetAnalogButton(params, analogs_param[analog_id],
+                                        analog_sub_buttons[sub_button_id]);
+                        ApplyConfiguration();
+                        Settings::SaveProfile(ui->profile->currentIndex());
+                    },
+                    InputCommon::Polling::DeviceType::Button);
             });
             connect(analog_map_buttons[analog_id][sub_button_id],
                     &QPushButton::customContextMenuRequested, [=](const QPoint& menu_location) {
@@ -231,16 +240,34 @@ ConfigureInput::ConfigureInput(QWidget* parent)
                     });
         }
         connect(analog_map_stick[analog_id], &QPushButton::clicked, [=]() {
-            QMessageBox::information(this, tr("Information"),
-                                     tr("After pressing OK, first move your joystick horizontally, "
-                                        "and then vertically."));
-            HandleClick(analog_map_stick[analog_id],
-                        [=](const Common::ParamPackage& params) {
-                            analogs_param[analog_id] = params;
-                            ApplyConfiguration();
-                            Settings::SaveProfile(ui->profile->currentIndex());
-                        },
-                        InputCommon::Polling::DeviceType::Analog);
+            if (QMessageBox::information(
+                    this, tr("Information"),
+                    tr("After pressing OK, first move your joystick horizontally, "
+                       "and then vertically."),
+                    QMessageBox::Ok | QMessageBox::Cancel) == QMessageBox::Ok) {
+                HandleClick(
+                    analog_map_stick[analog_id],
+                    [=](const Common::ParamPackage& params) {
+                        analogs_param[analog_id] = params;
+                        ApplyConfiguration();
+                        Settings::SaveProfile(ui->profile->currentIndex());
+                    },
+                    InputCommon::Polling::DeviceType::Analog);
+            }
+        });
+        connect(analog_map_deadzone_and_modifier_slider[analog_id], &QSlider::valueChanged, [=] {
+            const float slider_value = analog_map_deadzone_and_modifier_slider[analog_id]->value();
+            if (analogs_param[analog_id].Get("engine", "") == "sdl") {
+                analog_map_deadzone_and_modifier_slider_label[analog_id]->setText(
+                    tr("Deadzone: %1%").arg(slider_value));
+                analogs_param[analog_id].Set("deadzone", slider_value / 100.0f);
+            } else {
+                analog_map_deadzone_and_modifier_slider_label[analog_id]->setText(
+                    tr("Modifier Scale: %1%").arg(slider_value));
+                analogs_param[analog_id].Set("modifier_scale", slider_value / 100.0f);
+            }
+            ApplyConfiguration();
+            Settings::SaveProfile(ui->profile->currentIndex());
         });
     }
 
@@ -251,6 +278,7 @@ ConfigureInput::ConfigureInput(QWidget* parent)
 
     ui->buttonDelete->setEnabled(ui->profile->count() > 1);
 
+    connect(ui->buttonAutoMap, &QPushButton::clicked, this, &ConfigureInput::AutoMap);
     connect(ui->buttonClearAll, &QPushButton::clicked, this, &ConfigureInput::ClearAll);
     connect(ui->buttonRestoreDefaults, &QPushButton::clicked, this,
             &ConfigureInput::RestoreDefaults);
@@ -347,8 +375,12 @@ void ConfigureInput::RestoreDefaults() {
                 Config::default_analogs[analog_id][sub_button_id])};
             SetAnalogButton(params, analogs_param[analog_id], analog_sub_buttons[sub_button_id]);
         }
+        analogs_param[analog_id].Set("modifier_scale", 0.5f);
     }
     UpdateButtonLabels();
+
+    ApplyConfiguration();
+    Settings::SaveProfile(Settings::values.current_input_profile_index);
 }
 
 void ConfigureInput::ClearAll() {
@@ -357,13 +389,12 @@ void ConfigureInput::ClearAll() {
             buttons_param[button_id].Clear();
     }
     for (int analog_id = 0; analog_id < Settings::NativeAnalog::NumAnalogs; analog_id++) {
-        for (int sub_button_id = 0; sub_button_id < ANALOG_SUB_BUTTONS_NUM; sub_button_id++) {
-            if (analog_map_buttons[analog_id][sub_button_id] &&
-                analog_map_buttons[analog_id][sub_button_id]->isEnabled())
-                analogs_param[analog_id].Erase(analog_sub_buttons[sub_button_id]);
-        }
+        analogs_param[analog_id].Clear();
     }
     UpdateButtonLabels();
+
+    ApplyConfiguration();
+    Settings::SaveProfile(Settings::values.current_input_profile_index);
 }
 
 void ConfigureInput::UpdateButtonLabels() {
@@ -380,9 +411,83 @@ void ConfigureInput::UpdateButtonLabels() {
             }
         }
         analog_map_stick[analog_id]->setText(tr("Set Analog Stick"));
+
+        auto& param = analogs_param[analog_id];
+        auto* const analog_stick_slider = analog_map_deadzone_and_modifier_slider[analog_id];
+        auto* const analog_stick_slider_label =
+            analog_map_deadzone_and_modifier_slider_label[analog_id];
+
+        if (param.Has("engine")) {
+            if (param.Get("engine", "") == "sdl") {
+                if (!param.Has("deadzone")) {
+                    param.Set("deadzone", 0.1f);
+                }
+
+                analog_stick_slider->setValue(static_cast<int>(param.Get("deadzone", 0.1f) * 100));
+                if (analog_stick_slider->value() == 0) {
+                    analog_stick_slider_label->setText(tr("Deadzone: 0%"));
+                }
+            } else {
+                if (!param.Has("modifier_scale")) {
+                    param.Set("modifier_scale", 0.5f);
+                }
+
+                analog_stick_slider->setValue(
+                    static_cast<int>(param.Get("modifier_scale", 0.5f) * 100));
+                if (analog_stick_slider->value() == 0) {
+                    analog_stick_slider_label->setText(tr("Modifier Scale: 0%"));
+                }
+            }
+        }
     }
 
     EmitInputKeysChanged();
+}
+
+void ConfigureInput::MapFromButton(const Common::ParamPackage& params) {
+    Common::ParamPackage aux_param;
+    bool mapped = false;
+    for (int button_id = 0; button_id < Settings::NativeButton::NumButtons; button_id++) {
+        aux_param = InputCommon::GetSDLControllerButtonBindByGUID(params.Get("guid", "0"),
+                                                                  params.Get("port", 0), button_id);
+        if (aux_param.Has("engine")) {
+            buttons_param[button_id] = aux_param;
+            mapped = true;
+        }
+    }
+    for (int analog_id = 0; analog_id < Settings::NativeAnalog::NumAnalogs; analog_id++) {
+        aux_param = InputCommon::GetSDLControllerAnalogBindByGUID(params.Get("guid", "0"),
+                                                                  params.Get("port", 0), analog_id);
+        if (aux_param.Has("engine")) {
+            analogs_param[analog_id] = aux_param;
+            mapped = true;
+        }
+    }
+    if (!mapped) {
+        QMessageBox::warning(
+            this, tr("Warning"),
+            tr("Auto mapping failed. Your controller may not have a corresponding mapping"));
+    }
+}
+
+void ConfigureInput::AutoMap() {
+    if (QMessageBox::information(this, tr("Information"),
+                                 tr("After pressing OK, press any button on your joystick"),
+                                 QMessageBox::Ok | QMessageBox::Cancel) == QMessageBox::Cancel) {
+        return;
+    }
+    input_setter = [=](const Common::ParamPackage& params) {
+        MapFromButton(params);
+        ApplyConfiguration();
+        Settings::SaveProfile(ui->profile->currentIndex());
+    };
+    device_pollers = InputCommon::Polling::GetPollers(InputCommon::Polling::DeviceType::Button);
+    want_keyboard_keys = false;
+    for (auto& poller : device_pollers) {
+        poller->Start();
+    }
+    timeout_timer->start(5000); // Cancel after 5 seconds
+    poll_timer->start(200);     // Check for new inputs every 200ms
 }
 
 void ConfigureInput::HandleClick(QPushButton* button,
@@ -502,6 +607,7 @@ void ConfigureInput::RenameProfile() {
 
     ui->profile->setItemText(ui->profile->currentIndex(), new_name);
     Settings::RenameCurrentProfile(new_name.toStdString());
+    Settings::SaveProfile(ui->profile->currentIndex());
 }
 
 bool ConfigureInput::IsProfileNameDuplicate(const QString& name) const {

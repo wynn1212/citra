@@ -15,9 +15,9 @@ namespace Frontend {
 
 ValidationError SoftwareKeyboard::ValidateFilters(const std::string& input) const {
     if (config.filters.prevent_digit) {
-        if (std::any_of(input.begin(), input.end(),
-                        [](unsigned char c) { return std::isdigit(c); })) {
-            return ValidationError::DigitNotAllowed;
+        if (std::count_if(input.begin(), input.end(),
+                          [](unsigned char c) { return std::isdigit(c); }) > config.max_digits) {
+            return ValidationError::MaxDigitsExceeded;
         }
     }
     if (config.filters.prevent_at) {
@@ -87,7 +87,7 @@ ValidationError SoftwareKeyboard::ValidateInput(const std::string& input) const 
     default:
         // TODO(jroweboy): What does hardware do in this case?
         LOG_CRITICAL(Frontend, "Application requested unknown validation method. Method: {}",
-                     static_cast<u32>(config.accept_mode));
+                     config.accept_mode);
         UNREACHABLE();
     }
 
@@ -120,12 +120,15 @@ ValidationError SoftwareKeyboard::ValidateButton(u8 button) const {
 }
 
 ValidationError SoftwareKeyboard::Finalize(const std::string& text, u8 button) {
-    ValidationError error;
-    if ((error = ValidateInput(text)) != ValidationError::None) {
-        return error;
-    }
-    if ((error = ValidateButton(button)) != ValidationError::None) {
-        return error;
+    // Skip check when OK is not pressed
+    if (button == static_cast<u8>(config.button_config)) {
+        ValidationError error;
+        if ((error = ValidateInput(text)) != ValidationError::None) {
+            return error;
+        }
+        if ((error = ValidateButton(button)) != ValidationError::None) {
+            return error;
+        }
     }
     data = {text, button};
     data_ready = true;

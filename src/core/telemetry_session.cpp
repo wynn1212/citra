@@ -23,20 +23,6 @@
 
 namespace Core {
 
-#ifdef ARCHITECTURE_x86_64
-static const char* CpuVendorToStr(Common::CPUVendor vendor) {
-    switch (vendor) {
-    case Common::CPUVendor::INTEL:
-        return "Intel";
-    case Common::CPUVendor::AMD:
-        return "Amd";
-    case Common::CPUVendor::OTHER:
-        return "Other";
-    }
-    UNREACHABLE();
-}
-#endif
-
 static u64 GenerateTelemetryId() {
     u64 telemetry_id{};
     CryptoPP::AutoSeededRandomPool rng;
@@ -143,8 +129,6 @@ void TelemetrySession::AddInitialInfo(Loader::AppLoader& app_loader) {
     AddField(Telemetry::FieldType::UserSystem, "CPU_Model", Common::GetCPUCaps().cpu_string);
     AddField(Telemetry::FieldType::UserSystem, "CPU_BrandString",
              Common::GetCPUCaps().brand_string);
-    AddField(Telemetry::FieldType::UserSystem, "CPU_Vendor",
-             CpuVendorToStr(Common::GetCPUCaps().vendor));
     AddField(Telemetry::FieldType::UserSystem, "CPU_Extension_x64_AES", Common::GetCPUCaps().aes);
     AddField(Telemetry::FieldType::UserSystem, "CPU_Extension_x64_AVX", Common::GetCPUCaps().avx);
     AddField(Telemetry::FieldType::UserSystem, "CPU_Extension_x64_AVX2", Common::GetCPUCaps().avx2);
@@ -181,9 +165,11 @@ void TelemetrySession::AddInitialInfo(Loader::AppLoader& app_loader) {
     AddField(Telemetry::FieldType::UserConfig, "Core_UseCpuJit", Settings::values.use_cpu_jit);
     AddField(Telemetry::FieldType::UserConfig, "Renderer_ResolutionFactor",
              Settings::values.resolution_factor);
-    AddField(Telemetry::FieldType::UserConfig, "Renderer_UseFrameLimit",
-             Settings::values.use_frame_limit);
     AddField(Telemetry::FieldType::UserConfig, "Renderer_FrameLimit", Settings::values.frame_limit);
+    AddField(Telemetry::FieldType::UserConfig, "Renderer_UseFrameLimitAlternate",
+             Settings::values.use_frame_limit_alternate);
+    AddField(Telemetry::FieldType::UserConfig, "Renderer_FrameLimitAlternate",
+             Settings::values.frame_limit_alternate);
     AddField(Telemetry::FieldType::UserConfig, "Renderer_UseHwRenderer",
              Settings::values.use_hw_renderer);
     AddField(Telemetry::FieldType::UserConfig, "Renderer_UseHwShader",
@@ -192,7 +178,7 @@ void TelemetrySession::AddInitialInfo(Loader::AppLoader& app_loader) {
              Settings::values.shaders_accurate_mul);
     AddField(Telemetry::FieldType::UserConfig, "Renderer_UseShaderJit",
              Settings::values.use_shader_jit);
-    AddField(Telemetry::FieldType::UserConfig, "Renderer_UseVsync", Settings::values.vsync_enabled);
+    AddField(Telemetry::FieldType::UserConfig, "Renderer_UseVsync", Settings::values.use_vsync_new);
     AddField(Telemetry::FieldType::UserConfig, "Renderer_FilterMode", Settings::values.filter_mode);
     AddField(Telemetry::FieldType::UserConfig, "Renderer_Render3d",
              static_cast<int>(Settings::values.render_3d));

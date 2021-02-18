@@ -17,11 +17,12 @@
 // enough for our purposes.
 template <typename Fn>
 #if defined(_MSC_VER)
-__declspec(noinline, noreturn)
+[[msvc::noinline, noreturn]]
 #elif defined(__GNUC__)
-    __attribute__((noinline, noreturn, cold))
+[[gnu::cold, gnu::noinline, noreturn]]
 #endif
-    static void assert_noinline_call(const Fn& fn) {
+static void
+assert_noinline_call(const Fn& fn) {
     fn();
     Crash();
     exit(1); // Keeps GCC's mouth shut about this actually returning
@@ -41,8 +42,9 @@ __declspec(noinline, noreturn)
         }                                                                                          \
     while (0)
 
-#define UNREACHABLE() ASSERT_MSG(false, "Unreachable code!")
-#define UNREACHABLE_MSG(...) ASSERT_MSG(false, __VA_ARGS__)
+#define UNREACHABLE() assert_noinline_call([] { LOG_CRITICAL(Debug, "Unreachable code!"); })
+#define UNREACHABLE_MSG(...)                                                                       \
+    assert_noinline_call([&] { LOG_CRITICAL(Debug, "Unreachable code!\n" __VA_ARGS__); })
 
 #ifdef _DEBUG
 #define DEBUG_ASSERT(_a_) ASSERT(_a_)
@@ -53,4 +55,4 @@ __declspec(noinline, noreturn)
 #endif
 
 #define UNIMPLEMENTED() LOG_CRITICAL(Debug, "Unimplemented code!")
-#define UNIMPLEMENTED_MSG(_a_, ...) ASSERT_MSG(false, _a_, __VA_ARGS__)
+#define UNIMPLEMENTED_MSG(_a_, ...) LOG_CRITICAL(Debug, _a_, __VA_ARGS__)

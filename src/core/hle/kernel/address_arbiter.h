@@ -6,8 +6,15 @@
 
 #include <memory>
 #include <vector>
+#include <boost/serialization/base_object.hpp>
+#include <boost/serialization/export.hpp>
+#include <boost/serialization/shared_ptr.hpp>
+#include <boost/serialization/string.hpp>
+#include <boost/serialization/vector.hpp>
+#include <boost/serialization/version.hpp>
 #include "common/common_types.h"
 #include "core/hle/kernel/object.h"
+#include "core/hle/kernel/thread.h"
 #include "core/hle/result.h"
 
 // Address arbiters are an underlying kernel synchronization object that can be created/used via
@@ -30,7 +37,7 @@ enum class ArbitrationType : u32 {
     DecrementAndWaitIfLessThanWithTimeout,
 };
 
-class AddressArbiter final : public Object {
+class AddressArbiter final : public Object, public WakeupCallback {
 public:
     explicit AddressArbiter(KernelSystem& kernel);
     ~AddressArbiter() override;
@@ -52,6 +59,8 @@ public:
     ResultCode ArbitrateAddress(std::shared_ptr<Thread> thread, ArbitrationType type, VAddr address,
                                 s32 value, u64 nanoseconds);
 
+    class Callback;
+
 private:
     KernelSystem& kernel;
 
@@ -67,6 +76,41 @@ private:
 
     /// Threads waiting for the address arbiter to be signaled.
     std::vector<std::shared_ptr<Thread>> waiting_threads;
+
+    std::shared_ptr<Callback> timeout_callback;
+
+    void WakeUp(ThreadWakeupReason reason, std::shared_ptr<Thread> thread,
+                std::shared_ptr<WaitObject> object);
+
+    class DummyCallback : public WakeupCallback {
+    public:
+        void WakeUp(ThreadWakeupReason reason, std::shared_ptr<Thread> thread,
+                    std::shared_ptr<WaitObject> object) override {}
+    };
+
+    friend class boost::serialization::access;
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int file_version) {
+        ar& boost::serialization::base_object<Object>(*this);
+        if (file_version == 1) {
+            // This rigmarole is needed because in past versions, AddressArbiter inherited
+            // WakeupCallback But it turns out this breaks shared_from_this, so we split it out.
+            // Using a dummy class to deserialize a base_object allows compatibility to be
+            // maintained.
+            DummyCallback x;
+            ar& boost::serialization::base_object<WakeupCallback>(x);
+        }
+        ar& name;
+        ar& waiting_threads;
+        if (file_version > 1) {
+            ar& timeout_callback;
+        }
+    }
 };
 
 } // namespace Kernel
+
+BOOST_CLASS_EXPORT_KEY(Kernel::AddressArbiter)
+BOOST_CLASS_EXPORT_KEY(Kernel::AddressArbiter::Callback)
+BOOST_CLASS_VERSION(Kernel::AddressArbiter, 2)
+CONSTRUCT_KERNEL_OBJECT(Kernel::AddressArbiter)

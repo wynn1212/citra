@@ -115,15 +115,12 @@ private:
         using std::chrono::duration_cast;
         using std::chrono::steady_clock;
 
-        // matches from the beginning up to the last '../' or 'src/'
-        static const std::regex trim_source_path(R"(.*([\/\\]|^)((\.\.)|(src))[\/\\])");
-
         Entry entry;
         entry.timestamp =
             duration_cast<std::chrono::microseconds>(steady_clock::now() - time_origin);
         entry.log_class = log_class;
         entry.log_level = log_level;
-        entry.filename = std::regex_replace(filename, trim_source_path, "");
+        entry.filename = filename;
         entry.line_num = line_nr;
         entry.function = function;
         entry.message = std::move(message);
@@ -147,10 +144,18 @@ void ColorConsoleBackend::Write(const Entry& entry) {
     PrintColoredMessage(entry);
 }
 
-// _SH_DENYWR allows read only access to the file for other programs.
-// It is #defined to 0 on other platforms
-FileBackend::FileBackend(const std::string& filename)
-    : file(filename, "w", _SH_DENYWR), bytes_written(0) {}
+FileBackend::FileBackend(const std::string& filename) : bytes_written(0) {
+    if (FileUtil::Exists(filename + ".old.txt")) {
+        FileUtil::Delete(filename + ".old.txt");
+    }
+    if (FileUtil::Exists(filename)) {
+        FileUtil::Rename(filename, filename + ".old.txt");
+    }
+
+    // _SH_DENYWR allows read only access to the file for other programs.
+    // It is #defined to 0 on other platforms
+    file = FileUtil::IOFile(filename, "w", _SH_DENYWR);
+}
 
 void FileBackend::Write(const Entry& entry) {
     // prevent logs from going over the maximum size (in case its spamming and the user doesn't
@@ -253,8 +258,10 @@ const char* GetLogClassName(Class log_class) {
 #undef CLS
 #undef SUB
     case Class::Count:
-        UNREACHABLE();
+        break;
     }
+    UNREACHABLE();
+    return "Invalid";
 }
 
 const char* GetLevelName(Level log_level) {
@@ -269,9 +276,11 @@ const char* GetLevelName(Level log_level) {
         LVL(Error);
         LVL(Critical);
     case Level::Count:
-        UNREACHABLE();
+        break;
     }
 #undef LVL
+    UNREACHABLE();
+    return "Invalid";
 }
 
 void SetGlobalFilter(const Filter& filter) {

@@ -2,9 +2,10 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <array>
 #include "citra_qt/debugger/wait_tree.h"
+#include "citra_qt/uisettings.h"
 #include "citra_qt/util/util.h"
-
 #include "common/assert.h"
 #include "core/hle/kernel/event.h"
 #include "core/hle/kernel/mutex.h"
@@ -12,11 +13,36 @@
 #include "core/hle/kernel/thread.h"
 #include "core/hle/kernel/timer.h"
 #include "core/hle/kernel/wait_object.h"
+#include "core/settings.h"
+
+namespace {
+
+constexpr std::array<std::array<Qt::GlobalColor, 2>, 8> WaitTreeColors{{
+    {Qt::GlobalColor::darkGreen, Qt::GlobalColor::green},
+    {Qt::GlobalColor::darkBlue, Qt::GlobalColor::cyan},
+    {Qt::GlobalColor::darkRed, Qt::GlobalColor::red},
+    {Qt::GlobalColor::darkYellow, Qt::GlobalColor::yellow},
+    {Qt::GlobalColor::darkCyan, Qt::GlobalColor::cyan},
+    {Qt::GlobalColor::red, Qt::GlobalColor::red},
+    {Qt::GlobalColor::darkCyan, Qt::GlobalColor::cyan},
+    {Qt::GlobalColor::gray, Qt::GlobalColor::gray},
+}};
+
+bool IsDarkTheme() {
+    const auto& theme = UISettings::values.theme;
+    return theme == QStringLiteral("qdarkstyle") || theme == QStringLiteral("colorful_dark");
+}
+
+} // namespace
 
 WaitTreeItem::~WaitTreeItem() = default;
 
 QColor WaitTreeItem::GetColor() const {
-    return QColor(Qt::GlobalColor::black);
+    if (IsDarkTheme()) {
+        return QColor(Qt::GlobalColor::white);
+    } else {
+        return QColor(Qt::GlobalColor::black);
+    }
 }
 
 std::vector<std::unique_ptr<WaitTreeItem>> WaitTreeItem::GetChildren() const {
@@ -51,12 +77,16 @@ std::size_t WaitTreeItem::Row() const {
 }
 
 std::vector<std::unique_ptr<WaitTreeThread>> WaitTreeItem::MakeThreadItemList() {
-    const auto& threads = Core::System::GetInstance().Kernel().GetThreadManager().GetThreadList();
+    u32 num_cores = Core::GetNumCores();
     std::vector<std::unique_ptr<WaitTreeThread>> item_list;
-    item_list.reserve(threads.size());
-    for (std::size_t i = 0; i < threads.size(); ++i) {
-        item_list.push_back(std::make_unique<WaitTreeThread>(*threads[i]));
-        item_list.back()->row = i;
+    for (u32 i = 0; i < num_cores; ++i) {
+        const auto& threads =
+            Core::System::GetInstance().Kernel().GetThreadManager(i).GetThreadList();
+        item_list.reserve(item_list.size() + threads.size());
+        for (std::size_t i = 0; i < threads.size(); ++i) {
+            item_list.push_back(std::make_unique<WaitTreeThread>(*threads[i]));
+            item_list.back()->row = i;
+        }
     }
     return item_list;
 }
@@ -178,30 +208,32 @@ QString WaitTreeThread::GetText() const {
     QString pc_info = tr(" PC = 0x%1 LR = 0x%2")
                           .arg(thread.context->GetProgramCounter(), 8, 16, QLatin1Char('0'))
                           .arg(thread.context->GetLinkRegister(), 8, 16, QLatin1Char('0'));
-    return WaitTreeWaitObject::GetText() + pc_info + " (" + status + ") ";
+    return QStringLiteral("%1%2 (%3) ").arg(WaitTreeWaitObject::GetText(), pc_info, status);
 }
 
 QColor WaitTreeThread::GetColor() const {
+    const std::size_t color_index = IsDarkTheme() ? 1 : 0;
+
     const auto& thread = static_cast<const Kernel::Thread&>(object);
     switch (thread.status) {
     case Kernel::ThreadStatus::Running:
-        return QColor(Qt::GlobalColor::darkGreen);
+        return QColor(WaitTreeColors[0][color_index]);
     case Kernel::ThreadStatus::Ready:
-        return QColor(Qt::GlobalColor::darkBlue);
+        return QColor(WaitTreeColors[1][color_index]);
     case Kernel::ThreadStatus::WaitArb:
-        return QColor(Qt::GlobalColor::darkRed);
+        return QColor(WaitTreeColors[2][color_index]);
     case Kernel::ThreadStatus::WaitSleep:
-        return QColor(Qt::GlobalColor::darkYellow);
+        return QColor(WaitTreeColors[3][color_index]);
     case Kernel::ThreadStatus::WaitIPC:
-        return QColor(Qt::GlobalColor::darkCyan);
+        return QColor(WaitTreeColors[4][color_index]);
     case Kernel::ThreadStatus::WaitSynchAll:
     case Kernel::ThreadStatus::WaitSynchAny:
     case Kernel::ThreadStatus::WaitHleEvent:
-        return QColor(Qt::GlobalColor::red);
+        return QColor(WaitTreeColors[5][color_index]);
     case Kernel::ThreadStatus::Dormant:
-        return QColor(Qt::GlobalColor::darkCyan);
+        return QColor(WaitTreeColors[6][color_index]);
     case Kernel::ThreadStatus::Dead:
-        return QColor(Qt::GlobalColor::gray);
+        return QColor(WaitTreeColors[7][color_index]);
     default:
         return WaitTreeItem::GetColor();
     }
@@ -231,8 +263,15 @@ std::vector<std::unique_ptr<WaitTreeItem>> WaitTreeThread::GetChildren() const {
         break;
     }
 
+    list.push_back(std::make_unique<WaitTreeText>(tr("object id = %1").arg(thread.GetObjectId())));
     list.push_back(std::make_unique<WaitTreeText>(tr("processor = %1").arg(processor)));
     list.push_back(std::make_unique<WaitTreeText>(tr("thread id = %1").arg(thread.GetThreadId())));
+    if (auto process = thread.owner_process.lock()) {
+        list.push_back(
+            std::make_unique<WaitTreeText>(tr("process = %1 (%2)")
+                                               .arg(QString::fromStdString(process->GetName()))
+                                               .arg(process->process_id)));
+    }
     list.push_back(std::make_unique<WaitTreeText>(tr("priority = %1(current) / %2(normal)")
                                                       .arg(thread.current_priority)
                                                       .arg(thread.nominal_priority)));

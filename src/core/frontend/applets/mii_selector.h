@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <string>
+#include <boost/serialization/version.hpp>
 #include "core/hle/applets/mii_selector.h"
 
 namespace Frontend {
@@ -29,6 +30,7 @@ struct MiiSelectorData {
 
 class MiiSelector {
 public:
+    virtual ~MiiSelector() = default;
     virtual void Setup(const MiiSelectorConfig& config) {
         this->config = MiiSelectorConfig(config);
     }

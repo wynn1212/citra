@@ -6,10 +6,10 @@
 
 #include <array>
 #include <atomic>
-#ifndef _MSC_VER
 #include <cstddef>
-#endif
 #include <memory>
+#include <vector>
+#include <boost/serialization/version.hpp>
 #include "common/bit_field.h"
 #include "common/common_funcs.h"
 #include "common/common_types.h"
@@ -110,7 +110,9 @@ struct SharedMem {
         s64 index_reset_ticks_previous; ///< Previous `index_reset_ticks`
         u32 index;                      ///< Index of the last updated pad state entry
 
-        INSERT_PADDING_WORDS(0x2);
+        INSERT_PADDING_WORDS(0x1);
+
+        f32 sliderstate_3d;
 
         PadState current_state; ///< Current state of the pad buttons
 
@@ -177,10 +179,6 @@ struct GyroscopeCalibrateParam {
     } x, y, z;
 };
 
-// TODO: MSVC does not support using offsetof() on non-static data members even though this
-//       is technically allowed since C++11. This macro should be enabled once MSVC adds
-//       support for that.
-#ifndef _MSC_VER
 #define ASSERT_REG_POSITION(field_name, position)                                                  \
     static_assert(offsetof(SharedMem, field_name) == position * 4,                                 \
                   "Field " #field_name " has invalid position")
@@ -189,7 +187,6 @@ ASSERT_REG_POSITION(pad.index_reset_ticks, 0x0);
 ASSERT_REG_POSITION(touch.index_reset_ticks, 0x2A);
 
 #undef ASSERT_REG_POSITION
-#endif // !defined(_MSC_VER)
 
 struct DirectionState {
     bool up;
@@ -294,7 +291,7 @@ public:
          */
         void GetGyroscopeLowCalibrateParam(Kernel::HLERequestContext& ctx);
 
-    private:
+    protected:
         std::shared_ptr<Module> hid;
     };
 
@@ -324,6 +321,14 @@ private:
     // Storing this here was necessary for emulation specific tasks like cheats or scripting.
     PadState state;
 
+    // xperia64: These are used to averate the previous N raw circle pad inputs with the current raw
+    // input to simulate the sluggishness of a real 3DS circle pad
+    // The Theatrhythm games rely on the circle pad being fairly slow to move, and from empircal
+    // testing, need a minimum of 3 averaging to not drop inputs
+    static constexpr s16 CIRCLE_PAD_AVERAGING = 3;
+    std::vector<s16> circle_pad_old_x = std::vector<s16>(CIRCLE_PAD_AVERAGING - 1, 0);
+    std::vector<s16> circle_pad_old_y = std::vector<s16>(CIRCLE_PAD_AVERAGING - 1, 0);
+
     u32 next_pad_index = 0;
     u32 next_touch_index = 0;
     u32 next_accelerometer_index = 0;
@@ -342,9 +347,18 @@ private:
     std::unique_ptr<Input::AnalogDevice> circle_pad;
     std::unique_ptr<Input::MotionDevice> motion_device;
     std::unique_ptr<Input::TouchDevice> touch_device;
+    std::unique_ptr<Input::TouchDevice> touch_btn_device;
+
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int);
+    friend class boost::serialization::access;
 };
 
 std::shared_ptr<Module> GetModule(Core::System& system);
 
 void InstallInterfaces(Core::System& system);
 } // namespace Service::HID
+
+SERVICE_CONSTRUCT(Service::HID::Module)
+BOOST_CLASS_EXPORT_KEY(Service::HID::Module)
+BOOST_CLASS_VERSION(Service::HID::Module, 1)

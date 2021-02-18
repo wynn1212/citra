@@ -7,11 +7,13 @@
 #include "citra_qt/util/util.h"
 #include "core/arm/arm_interface.h"
 #include "core/core.h"
+#include "ui_registers.h"
 
-RegistersWidget::RegistersWidget(QWidget* parent) : QDockWidget(parent) {
-    cpu_regs_ui.setupUi(this);
+RegistersWidget::RegistersWidget(QWidget* parent)
+    : QDockWidget(parent), cpu_regs_ui(std::make_unique<Ui::ARMRegisters>()) {
+    cpu_regs_ui->setupUi(this);
 
-    tree = cpu_regs_ui.treeWidget;
+    tree = cpu_regs_ui->treeWidget;
     tree->addTopLevelItem(core_registers = new QTreeWidgetItem(QStringList(tr("Registers"))));
     tree->addTopLevelItem(vfp_registers = new QTreeWidgetItem(QStringList(tr("VFP Registers"))));
     tree->addTopLevelItem(vfp_system_registers =
@@ -57,17 +59,20 @@ RegistersWidget::RegistersWidget(QWidget* parent) : QDockWidget(parent) {
     setEnabled(false);
 }
 
+RegistersWidget::~RegistersWidget() = default;
+
 void RegistersWidget::OnDebugModeEntered() {
     if (!Core::System::GetInstance().IsPoweredOn())
         return;
 
+    // Todo: Handle all cores
     for (int i = 0; i < core_registers->childCount(); ++i)
         core_registers->child(i)->setText(
-            1, QStringLiteral("0x%1").arg(Core::CPU().GetReg(i), 8, 16, QLatin1Char('0')));
+            1, QStringLiteral("0x%1").arg(Core::GetCore(0).GetReg(i), 8, 16, QLatin1Char('0')));
 
     for (int i = 0; i < vfp_registers->childCount(); ++i)
         vfp_registers->child(i)->setText(
-            1, QStringLiteral("0x%1").arg(Core::CPU().GetVFPReg(i), 8, 16, QLatin1Char('0')));
+            1, QStringLiteral("0x%1").arg(Core::GetCore(0).GetVFPReg(i), 8, 16, QLatin1Char('0')));
 
     UpdateCPSRValues();
     UpdateVFPSystemRegisterValues();
@@ -102,8 +107,6 @@ void RegistersWidget::OnEmulationStopping() {
 
     vfp_system_registers->child(0)->setText(1, QString{});
     vfp_system_registers->child(1)->setText(1, QString{});
-    vfp_system_registers->child(2)->setText(1, QString{});
-    vfp_system_registers->child(3)->setText(1, QString{});
 
     setEnabled(false);
 }
@@ -127,7 +130,8 @@ void RegistersWidget::CreateCPSRChildren() {
 }
 
 void RegistersWidget::UpdateCPSRValues() {
-    const u32 cpsr_val = Core::CPU().GetCPSR();
+    // Todo: Handle all cores
+    const u32 cpsr_val = Core::GetCore(0).GetCPSR();
 
     cpsr->setText(1, QStringLiteral("0x%1").arg(cpsr_val, 8, 16, QLatin1Char('0')));
     cpsr->child(0)->setText(
@@ -186,15 +190,12 @@ void RegistersWidget::CreateVFPSystemRegisterChildren() {
 
     vfp_system_registers->addChild(fpscr);
     vfp_system_registers->addChild(fpexc);
-    vfp_system_registers->addChild(new QTreeWidgetItem(QStringList(QStringLiteral("FPINST"))));
-    vfp_system_registers->addChild(new QTreeWidgetItem(QStringList(QStringLiteral("FPINST2"))));
 }
 
 void RegistersWidget::UpdateVFPSystemRegisterValues() {
-    const u32 fpscr_val = Core::CPU().GetVFPSystemReg(VFP_FPSCR);
-    const u32 fpexc_val = Core::CPU().GetVFPSystemReg(VFP_FPEXC);
-    const u32 fpinst_val = Core::CPU().GetVFPSystemReg(VFP_FPINST);
-    const u32 fpinst2_val = Core::CPU().GetVFPSystemReg(VFP_FPINST2);
+    // Todo: handle all cores
+    const u32 fpscr_val = Core::GetCore(0).GetVFPSystemReg(VFP_FPSCR);
+    const u32 fpexc_val = Core::GetCore(0).GetVFPSystemReg(VFP_FPEXC);
 
     QTreeWidgetItem* const fpscr = vfp_system_registers->child(0);
     fpscr->setText(1, QStringLiteral("0x%1").arg(fpscr_val, 8, 16, QLatin1Char('0')));
@@ -234,9 +235,4 @@ void RegistersWidget::UpdateVFPSystemRegisterValues() {
     fpexc->child(5)->setText(1, QString::number((fpexc_val >> 28) & 1));
     fpexc->child(6)->setText(1, QString::number((fpexc_val >> 30) & 1));
     fpexc->child(7)->setText(1, QString::number((fpexc_val >> 31) & 1));
-
-    vfp_system_registers->child(2)->setText(
-        1, QStringLiteral("0x%1").arg(fpinst_val, 8, 16, QLatin1Char('0')));
-    vfp_system_registers->child(3)->setText(
-        1, QStringLiteral("0x%1").arg(fpinst2_val, 8, 16, QLatin1Char('0')));
 }

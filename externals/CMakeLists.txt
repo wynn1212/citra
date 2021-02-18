@@ -1,8 +1,27 @@
 # Definitions for all external bundled libraries
 
+# Suppress warnings from external libraries
+if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    add_compile_options(/W0)
+endif()
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/CMakeModules)
 include(DownloadExternals)
 include(ExternalProject)
+
+# Boost
+set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/externals/boost")
+set(Boost_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/externals/boost")
+set(Boost_NO_SYSTEM_PATHS ON)
+add_library(boost INTERFACE)
+target_include_directories(boost SYSTEM INTERFACE ${Boost_INCLUDE_DIR})
+
+# Boost::serialization
+file(GLOB boost_serialization_SRC "${CMAKE_SOURCE_DIR}/externals/boost/libs/serialization/src/*.cpp")
+add_library(boost_serialization STATIC ${boost_serialization_SRC})
+target_link_libraries(boost_serialization PUBLIC boost)
+
+# Add additional boost libs here; remember to ALIAS them in the root CMakeLists!
 
 # Catch
 add_library(catch-single-include INTERFACE)
@@ -11,12 +30,18 @@ target_include_directories(catch-single-include INTERFACE catch/single_include)
 # Crypto++
 add_subdirectory(cryptopp)
 
-# Dynarmic
+# Xbyak
 if (ARCHITECTURE_x86_64)
-    # Dynarmic will skip defining xbyak if it's already defined, we then define it below
     add_library(xbyak INTERFACE)
-    option(DYNARMIC_TESTS OFF)
+    target_include_directories(xbyak SYSTEM INTERFACE ./xbyak/xbyak)
+    target_compile_definitions(xbyak INTERFACE XBYAK_NO_OP_NAMES)
+endif()
+
+# Dynarmic
+if (ARCHITECTURE_x86_64 OR ARCHITECTURE_ARM64)
+    set(DYNARMIC_TESTS OFF)
     set(DYNARMIC_NO_BUNDLED_FMT ON)
+    set(DYNARMIC_FRONTENDS "A32")
     add_subdirectory(dynarmic)
 endif()
 
@@ -52,15 +77,11 @@ add_subdirectory(soundtouch)
 target_include_directories(SoundTouch INTERFACE ./soundtouch/include)
 
 # Teakra
-add_subdirectory(teakra)
+add_subdirectory(teakra EXCLUDE_FROM_ALL)
 
-# Xbyak
-if (ARCHITECTURE_x86_64)
-    # Defined before "dynarmic" above
-    # add_library(xbyak INTERFACE)
-    target_include_directories(xbyak INTERFACE ./xbyak/xbyak)
-    target_compile_definitions(xbyak INTERFACE XBYAK_NO_OP_NAMES)
-endif()
+# Zstandard
+add_subdirectory(zstd/build/cmake EXCLUDE_FROM_ALL)
+target_include_directories(libzstd_static INTERFACE $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/externals/zstd/lib>)
 
 # ENet
 add_subdirectory(enet)
@@ -92,11 +113,19 @@ if (ENABLE_WEB_SERVICE)
     # lurlparser
     add_subdirectory(lurlparser EXCLUDE_FROM_ALL)
 
+    if(ANDROID)
+        add_subdirectory(android-ifaddrs)
+    endif()
+
     # httplib
     add_library(httplib INTERFACE)
     target_include_directories(httplib INTERFACE ./httplib)
+    target_compile_options(httplib INTERFACE -DCPPHTTPLIB_OPENSSL_SUPPORT)
 
     # cpp-jwt
     add_library(cpp-jwt INTERFACE)
     target_include_directories(cpp-jwt INTERFACE ./cpp-jwt/include)
 endif()
+
+# lodepng
+add_subdirectory(lodepng)

@@ -4,14 +4,17 @@
 
 #include <map>
 #include <vector>
-#include <boost/range/algorithm_ext/erase.hpp>
+#include "common/archives.h"
 #include "common/assert.h"
 #include "core/core.h"
+#include "core/global.h"
 #include "core/hle/kernel/errors.h"
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/mutex.h"
 #include "core/hle/kernel/object.h"
 #include "core/hle/kernel/thread.h"
+
+SERIALIZE_EXPORT_IMPL(Kernel::Mutex)
 
 namespace Kernel {
 
@@ -36,7 +39,7 @@ std::shared_ptr<Mutex> KernelSystem::CreateMutex(bool initial_locked, std::strin
 
     // Acquire mutex with current thread if initialized as locked
     if (initial_locked)
-        mutex->Acquire(thread_manager->GetCurrentThread());
+        mutex->Acquire(thread_managers[current_cpu->GetID()]->GetCurrentThread());
 
     return mutex;
 }

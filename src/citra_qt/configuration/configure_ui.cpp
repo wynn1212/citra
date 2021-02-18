@@ -7,25 +7,10 @@
 #include "citra_qt/uisettings.h"
 #include "ui_configure_ui.h"
 
-ConfigureUi::ConfigureUi(QWidget* parent) : QWidget(parent), ui(new Ui::ConfigureUi) {
+ConfigureUi::ConfigureUi(QWidget* parent)
+    : QWidget(parent), ui(std::make_unique<Ui::ConfigureUi>()) {
     ui->setupUi(this);
-    ui->language_combobox->addItem(tr("<System>"), QString{});
-    ui->language_combobox->addItem(tr("English"), QStringLiteral("en"));
-    QDirIterator it(QStringLiteral(":/languages"), QDirIterator::NoIteratorFlags);
-    while (it.hasNext()) {
-        QString locale = it.next();
-        locale.truncate(locale.lastIndexOf(QLatin1Char{'.'}));
-        locale.remove(0, locale.lastIndexOf(QLatin1Char{'/'}) + 1);
-        QString lang = QLocale::languageToString(QLocale(locale).language());
-        ui->language_combobox->addItem(lang, locale);
-    }
-
-    // Unlike other configuration changes, interface language changes need to be reflected on the
-    // interface immediately. This is done by passing a signal to the main window, and then
-    // retranslating when passing back.
-    connect(ui->language_combobox,
-            static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this,
-            &ConfigureUi::OnLanguageChanged);
+    InitializeLanguageComboBox();
 
     for (const auto& theme : UISettings::themes) {
         ui->theme_combobox->addItem(QString::fromUtf8(theme.first),
@@ -37,6 +22,25 @@ ConfigureUi::ConfigureUi(QWidget* parent) : QWidget(parent), ui(new Ui::Configur
 
 ConfigureUi::~ConfigureUi() = default;
 
+void ConfigureUi::InitializeLanguageComboBox() {
+    ui->language_combobox->addItem(tr("<System>"), QString{});
+    ui->language_combobox->addItem(tr("English"), QStringLiteral("en"));
+    QDirIterator it(QStringLiteral(":/languages"), QDirIterator::NoIteratorFlags);
+    while (it.hasNext()) {
+        QString locale = it.next();
+        locale.truncate(locale.lastIndexOf(QLatin1Char{'.'}));
+        locale.remove(0, locale.lastIndexOf(QLatin1Char{'/'}) + 1);
+        const QString lang = QLocale::languageToString(QLocale(locale).language());
+        ui->language_combobox->addItem(lang, locale);
+    }
+
+    // Unlike other configuration changes, interface language changes need to be reflected on the
+    // interface immediately. This is done by passing a signal to the main window, and then
+    // retranslating when passing back.
+    connect(ui->language_combobox, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            &ConfigureUi::OnLanguageChanged);
+}
+
 void ConfigureUi::SetConfiguration() {
     ui->theme_combobox->setCurrentIndex(ui->theme_combobox->findData(UISettings::values.theme));
     ui->language_combobox->setCurrentIndex(
@@ -47,6 +51,7 @@ void ConfigureUi::SetConfiguration() {
     ui->row_2_text_combobox->setCurrentIndex(static_cast<int>(UISettings::values.game_list_row_2) +
                                              1);
     ui->toggle_hide_no_icon->setChecked(UISettings::values.game_list_hide_no_icon);
+    ui->toggle_single_line_mode->setChecked(UISettings::values.game_list_single_line_mode);
 }
 
 void ConfigureUi::ApplyConfiguration() {
@@ -59,6 +64,7 @@ void ConfigureUi::ApplyConfiguration() {
     UISettings::values.game_list_row_2 =
         static_cast<UISettings::GameListText>(ui->row_2_text_combobox->currentIndex() - 1);
     UISettings::values.game_list_hide_no_icon = ui->toggle_hide_no_icon->isChecked();
+    UISettings::values.game_list_single_line_mode = ui->toggle_single_line_mode->isChecked();
 }
 
 void ConfigureUi::OnLanguageChanged(int index) {

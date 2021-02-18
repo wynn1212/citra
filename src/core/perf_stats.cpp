@@ -8,8 +8,8 @@
 #include <mutex>
 #include <numeric>
 #include <thread>
+#include <fmt/chrono.h>
 #include <fmt/format.h>
-#include <fmt/time.h>
 #include "common/file_util.h"
 #include "core/hw/gpu.h"
 #include "core/perf_stats.h"
@@ -33,13 +33,13 @@ PerfStats::~PerfStats() {
         return;
     }
 
-    std::time_t t = std::time(nullptr);
+    const std::time_t t = std::time(nullptr);
     std::ostringstream stream;
     std::copy(perf_history.begin() + IgnoreFrames, perf_history.begin() + current_index,
               std::ostream_iterator<double>(stream, "\n"));
-    std::string path = FileUtil::GetUserPath(FileUtil::UserPath::LogDir);
+    const std::string& path = FileUtil::GetUserPath(FileUtil::UserPath::LogDir);
     // %F Date format expanded is "%Y-%m-%d"
-    std::string filename =
+    const std::string filename =
         fmt::format("{}/{:%F-%H-%M}_{:016X}.csv", path, *std::localtime(&t), title_id);
     FileUtil::IOFile file(filename, "w");
     file.WriteString(stream.str());
@@ -73,13 +73,16 @@ void PerfStats::EndGameFrame() {
     game_frames += 1;
 }
 
-double PerfStats::GetMeanFrametime() {
+double PerfStats::GetMeanFrametime() const {
+    std::lock_guard lock{object_mutex};
+
     if (current_index <= IgnoreFrames) {
         return 0;
     }
-    double sum = std::accumulate(perf_history.begin() + IgnoreFrames,
-                                 perf_history.begin() + current_index, 0);
-    return sum / (current_index - IgnoreFrames);
+
+    const double sum = std::accumulate(perf_history.begin() + IgnoreFrames,
+                                       perf_history.begin() + current_index, 0.0);
+    return sum / static_cast<double>(current_index - IgnoreFrames);
 }
 
 PerfStats::Results PerfStats::GetAndResetStats(microseconds current_system_time_us) {
@@ -108,11 +111,19 @@ PerfStats::Results PerfStats::GetAndResetStats(microseconds current_system_time_
     return results;
 }
 
-double PerfStats::GetLastFrameTimeScale() {
+double PerfStats::GetLastFrameTimeScale() const {
     std::lock_guard lock{object_mutex};
 
     constexpr double FRAME_LENGTH = 1.0 / GPU::SCREEN_REFRESH_RATE;
     return duration_cast<DoubleSecs>(previous_frame_length).count() / FRAME_LENGTH;
+}
+
+void FrameLimiter::WaitOnce() {
+    if (frame_advancing_enabled) {
+        // Frame advancing is enabled: wait on event instead of doing framelimiting
+        frame_advance_event.Wait();
+        frame_advance_event.Reset();
+    }
 }
 
 void FrameLimiter::DoFrameLimiting(microseconds current_system_time_us) {
@@ -123,12 +134,17 @@ void FrameLimiter::DoFrameLimiting(microseconds current_system_time_us) {
         return;
     }
 
-    if (!Settings::values.use_frame_limit) {
-        return;
-    }
-
     auto now = Clock::now();
     double sleep_scale = Settings::values.frame_limit / 100.0;
+
+    if (Settings::values.use_frame_limit_alternate) {
+        if (Settings::values.frame_limit_alternate == 0) {
+            return;
+        }
+        sleep_scale = Settings::values.frame_limit_alternate / 100.0;
+    } else if (Settings::values.frame_limit == 0) {
+        return;
+    }
 
     // Max lag caused by slow frames. Shouldn't be more than the length of a frame at the current
     // speed percent or it will clamp too much and prevent this from properly limiting to that
@@ -162,10 +178,6 @@ void FrameLimiter::SetFrameAdvancing(bool value) {
 }
 
 void FrameLimiter::AdvanceFrame() {
-    if (!frame_advancing_enabled) {
-        // Start frame advancing
-        frame_advancing_enabled = true;
-    }
     frame_advance_event.Set();
 }
 

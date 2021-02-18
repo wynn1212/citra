@@ -146,7 +146,7 @@ struct DspLle::Impl final {
     std::size_t stop_generation;
 
     static constexpr u32 DspDataOffset = 0x40000;
-    static constexpr u32 TeakraSlice = 20000;
+    static constexpr u32 TeakraSlice = 16384;
 
     void TeakraThread() {
         while (true) {
@@ -483,7 +483,8 @@ DspLle::DspLle(Memory::MemorySystem& memory, bool multithread)
         *memory.GetFCRAMPointer(address - Memory::FCRAM_PADDR) = value;
     };
     impl->teakra.SetAHBMCallback(ahbm);
-    impl->teakra.SetAudioCallback([this](std::array<s16, 2> sample) { OutputSample(sample); });
+    impl->teakra.SetAudioCallback(
+        [this](std::array<s16, 2> sample) { OutputSample(std::move(sample)); });
 }
 DspLle::~DspLle() = default;
 

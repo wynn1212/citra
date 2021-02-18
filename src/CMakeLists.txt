@@ -31,19 +31,30 @@ if (MSVC)
     # /Zc:externConstexpr - Allow extern constexpr variables to have external linkage, like the standard mandates
     # /Zc:inline          - Let codegen omit inline functions in object files
     # /Zc:throwingNew     - Let codegen assume `operator new` (without std::nothrow) will never return null
+    # /external:*         - Suppress warnings from external headers
     add_compile_options(
         /W3
         /MP
-        /Zi
-        /Zo
         /permissive-
         /EHsc
-        /std:c++latest
         /volatile:iso
         /Zc:externConstexpr
         /Zc:inline
         /Zc:throwingNew
+        /experimental:external
+        /external:I "${CMAKE_SOURCE_DIR}/externals"
+        /external:anglebrackets
+        /external:W0
     )
+
+    # Since MSVC's debugging information is not very deterministic, so we have to disable it
+    # when using ccache or other caching tools
+    if (NOT USE_CCACHE)
+        add_compile_options(
+            /Zi
+            /Zo
+        )
+    endif()
 
     # /GS- - No stack buffer overflow checks
     add_compile_options("$<$<CONFIG:Release>:/GS->")
@@ -79,6 +90,15 @@ else()
             add_definitions(-DQT_STATICPLUGIN)
             add_compile_options("-static")
         endif()
+    endif()
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR MINGW)
+        # GNU ar: Create thin archive files.
+        # Requires binutils-2.19 or later.
+        set(CMAKE_C_ARCHIVE_CREATE   "<CMAKE_AR> qcTP <TARGET> <LINK_FLAGS> <OBJECTS>")
+        set(CMAKE_C_ARCHIVE_APPEND   "<CMAKE_AR> qTP  <TARGET> <LINK_FLAGS> <OBJECTS>")
+        set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> qcTP <TARGET> <LINK_FLAGS> <OBJECTS>")
+        set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> qTP  <TARGET> <LINK_FLAGS> <OBJECTS>")
     endif()
 endif()
 

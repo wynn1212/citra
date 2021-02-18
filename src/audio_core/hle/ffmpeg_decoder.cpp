@@ -12,6 +12,9 @@ public:
     explicit Impl(Memory::MemorySystem& memory);
     ~Impl();
     std::optional<BinaryResponse> ProcessRequest(const BinaryRequest& request);
+    bool IsValid() const {
+        return have_ffmpeg_dl;
+    }
 
 private:
     std::optional<BinaryResponse> Initalize(const BinaryRequest& request);
@@ -208,6 +211,7 @@ std::optional<BinaryResponse> FFMPEGDecoder::Impl::Decode(const BinaryRequest& r
 
                 std::size_t size = bytes_per_sample * (decoded_frame->nb_samples);
 
+                response.sample_rate = GetSampleRateEnum(decoded_frame->sample_rate);
                 response.num_channels = decoded_frame->channels;
                 response.num_samples += decoded_frame->nb_samples;
 
@@ -259,6 +263,10 @@ FFMPEGDecoder::~FFMPEGDecoder() = default;
 
 std::optional<BinaryResponse> FFMPEGDecoder::ProcessRequest(const BinaryRequest& request) {
     return impl->ProcessRequest(request);
+}
+
+bool FFMPEGDecoder::IsValid() const {
+    return impl->IsValid();
 }
 
 } // namespace AudioCore::HLE

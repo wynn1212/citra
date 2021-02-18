@@ -5,9 +5,15 @@
 #pragma once
 
 #include <array>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <vector>
+#include <boost/serialization/array.hpp>
+#include <boost/serialization/optional.hpp>
+#include <boost/serialization/shared_ptr.hpp>
+#include <boost/serialization/vector.hpp>
+#include "core/global.h"
 #include "core/hle/kernel/event.h"
 #include "core/hle/result.h"
 #include "core/hle/service/fs/archive.h"
@@ -84,6 +90,17 @@ struct MessageParameter {
     SignalType signal = SignalType::None;
     std::shared_ptr<Kernel::Object> object = nullptr;
     std::vector<u8> buffer;
+
+private:
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int) {
+        ar& sender_id;
+        ar& destination_id;
+        ar& signal;
+        ar& object;
+        ar& buffer;
+    }
+    friend class boost::serialization::access;
 };
 
 /// Holds information about the parameters used in StartLibraryApplet
@@ -143,7 +160,30 @@ public:
 
     ResultCode PrepareToDoApplicationJump(u64 title_id, FS::MediaType media_type,
                                           ApplicationJumpFlags flags);
-    ResultCode DoApplicationJump();
+
+    struct DeliverArg {
+        std::vector<u8> param;
+        std::vector<u8> hmac;
+        u64 source_program_id = std::numeric_limits<u64>::max();
+
+    private:
+        template <class Archive>
+        void serialize(Archive& ar, const unsigned int) {
+            ar& param;
+            ar& hmac;
+            ar& source_program_id;
+        }
+        friend class boost::serialization::access;
+    };
+
+    ResultCode DoApplicationJump(DeliverArg arg);
+
+    boost::optional<DeliverArg> ReceiveDeliverArg() const {
+        return deliver_arg;
+    }
+    void SetDeliverArg(boost::optional<DeliverArg> arg) {
+        deliver_arg = std::move(arg);
+    }
 
     struct AppletInfo {
         u64 title_id;
@@ -158,9 +198,23 @@ public:
     struct ApplicationJumpParameters {
         u64 next_title_id;
         FS::MediaType next_media_type;
+        ApplicationJumpFlags flags;
 
         u64 current_title_id;
         FS::MediaType current_media_type;
+
+    private:
+        template <class Archive>
+        void serialize(Archive& ar, const unsigned int file_version) {
+            ar& next_title_id;
+            ar& next_media_type;
+            if (file_version > 0) {
+                ar& flags;
+            }
+            ar& current_title_id;
+            ar& current_media_type;
+        }
+        friend class boost::serialization::access;
     };
 
     ApplicationJumpParameters GetApplicationJumpParameters() const {
@@ -169,7 +223,8 @@ public:
 
 private:
     /// Parameter data to be returned in the next call to Glance/ReceiveParameter.
-    std::optional<MessageParameter> next_parameter;
+    // NOTE: A bug in gcc prevents serializing std::optional
+    boost::optional<MessageParameter> next_parameter;
 
     static constexpr std::size_t NumAppletSlot = 4;
 
@@ -199,9 +254,24 @@ private:
             title_id = 0;
             attributes.raw = 0;
         }
+
+    private:
+        template <class Archive>
+        void serialize(Archive& ar, const unsigned int) {
+            ar& applet_id;
+            ar& slot;
+            ar& title_id;
+            ar& registered;
+            ar& loaded;
+            ar& attributes.raw;
+            ar& notification_event;
+            ar& parameter_event;
+        }
+        friend class boost::serialization::access;
     };
 
     ApplicationJumpParameters app_jump_parameters{};
+    boost::optional<DeliverArg> deliver_arg{};
 
     // Holds data about the concurrently running applets in the system.
     std::array<AppletSlotData, NumAppletSlot> applet_slots = {};
@@ -216,6 +286,24 @@ private:
     SignalType library_applet_closing_command;
 
     Core::System& system;
+
+private:
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int file_version) {
+        ar& next_parameter;
+        ar& app_jump_parameters;
+        if (file_version > 0) {
+            ar& deliver_arg;
+        }
+        ar& applet_slots;
+        ar& library_applet_closing_command;
+    }
+    friend class boost::serialization::access;
 };
 
 } // namespace Service::APT
+
+BOOST_CLASS_VERSION(Service::APT::AppletManager::ApplicationJumpParameters, 1)
+BOOST_CLASS_VERSION(Service::APT::AppletManager, 1)
+
+SERVICE_CONSTRUCT(Service::APT::AppletManager)

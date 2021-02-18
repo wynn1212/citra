@@ -3,7 +3,9 @@
 // Refer to the license.txt file included.
 
 #include <array>
+#include <limits>
 #include <memory>
+#include <sstream>
 #include <unordered_map>
 #include "common/assert.h"
 #include "common/common_funcs.h"
@@ -355,12 +357,12 @@ u64 GetSize(FILE* f) {
     // can't use off_t here because it can be 32-bit
     u64 pos = ftello(f);
     if (fseeko(f, 0, SEEK_END) != 0) {
-        LOG_ERROR(Common_Filesystem, "GetSize: seek failed {}: {}", (void*)f, GetLastErrorMsg());
+        LOG_ERROR(Common_Filesystem, "GetSize: seek failed {}: {}", fmt::ptr(f), GetLastErrorMsg());
         return 0;
     }
     u64 size = ftello(f);
     if ((size != pos) && (fseeko(f, pos, SEEK_SET) != 0)) {
-        LOG_ERROR(Common_Filesystem, "GetSize: seek failed {}: {}", (void*)f, GetLastErrorMsg());
+        LOG_ERROR(Common_Filesystem, "GetSize: seek failed {}: {}", fmt::ptr(f), GetLastErrorMsg());
         return 0;
     }
     return size;
@@ -369,7 +371,7 @@ u64 GetSize(FILE* f) {
 bool CreateEmptyFile(const std::string& filename) {
     LOG_TRACE(Common_Filesystem, "{}", filename);
 
-    if (!FileUtil::IOFile(filename, "wb")) {
+    if (!FileUtil::IOFile(filename, "wb").IsOpen()) {
         LOG_ERROR(Common_Filesystem, "failed {}: {}", filename, GetLastErrorMsg());
         return false;
     }
@@ -469,6 +471,17 @@ u64 ScanDirectoryTree(const std::string& directory, FSTEntry& parent_entry,
     return ForeachDirectoryEntry(&num_entries, directory, callback) ? num_entries : 0;
 }
 
+void GetAllFilesFromNestedEntries(FSTEntry& directory, std::vector<FSTEntry>& output) {
+    std::vector<FSTEntry> files;
+    for (auto& entry : directory.children) {
+        if (entry.isDirectory) {
+            GetAllFilesFromNestedEntries(entry, output);
+        } else {
+            output.push_back(entry);
+        }
+    }
+}
+
 bool DeleteDirRecursively(const std::string& directory, unsigned int recursion) {
     const auto callback = [recursion](u64* num_entries_out, const std::string& directory,
                                       const std::string& virtual_name) -> bool {
@@ -529,13 +542,12 @@ void CopyDir(const std::string& source_path, const std::string& dest_path) {
 std::optional<std::string> GetCurrentDir() {
 // Get the current working directory (getcwd uses malloc)
 #ifdef _WIN32
-    wchar_t* dir;
-    if (!(dir = _wgetcwd(nullptr, 0)))
+    wchar_t* dir = _wgetcwd(nullptr, 0);
+    if (!dir) {
 #else
-    char* dir;
-    if (!(dir = getcwd(nullptr, 0)))
+    char* dir = getcwd(nullptr, 0);
+    if (!dir) {
 #endif
-    {
         LOG_ERROR(Common_Filesystem, "GetCurrentDirectory failed: {}", GetLastErrorMsg());
         return {};
     }
@@ -546,7 +558,7 @@ std::optional<std::string> GetCurrentDir() {
 #endif
     free(dir);
     return strDir;
-}
+} // namespace FileUtil
 
 bool SetCurrentDir(const std::string& directory) {
 #ifdef _WIN32
@@ -712,6 +724,36 @@ void SetUserPath(const std::string& path) {
     g_paths.emplace(UserPath::CheatsDir, user_path + CHEATS_DIR DIR_SEP);
     g_paths.emplace(UserPath::DLLDir, user_path + DLL_DIR DIR_SEP);
     g_paths.emplace(UserPath::ShaderDir, user_path + SHADER_DIR DIR_SEP);
+    g_paths.emplace(UserPath::DumpDir, user_path + DUMP_DIR DIR_SEP);
+    g_paths.emplace(UserPath::LoadDir, user_path + LOAD_DIR DIR_SEP);
+    g_paths.emplace(UserPath::StatesDir, user_path + STATES_DIR DIR_SEP);
+}
+
+std::string g_currentRomPath{};
+
+void SetCurrentRomPath(const std::string& path) {
+    g_currentRomPath = path;
+}
+
+bool StringReplace(std::string& haystack, const std::string& a, const std::string& b, bool swap) {
+    const auto& needle = swap ? b : a;
+    const auto& replacement = swap ? a : b;
+    if (needle.empty()) {
+        return false;
+    }
+    auto index = haystack.find(needle, 0);
+    if (index == std::string::npos) {
+        return false;
+    }
+    haystack.replace(index, needle.size(), replacement);
+    return true;
+}
+
+std::string SerializePath(const std::string& input, bool is_saving) {
+    auto result = input;
+    StringReplace(result, "%CITRA_ROM_FILE%", g_currentRomPath, is_saving);
+    StringReplace(result, "%CITRA_USER_DIR%", GetUserPath(UserPath::UserDir), is_saving);
+    return result;
 }
 
 const std::string& GetUserPath(UserPath path) {
@@ -720,7 +762,6 @@ const std::string& GetUserPath(UserPath path) {
         SetUserPath();
     return g_paths[path];
 }
-
 std::size_t WriteStringToFile(bool text_file, const std::string& filename, std::string_view str) {
     return IOFile(filename, text_file ? "w" : "wb").WriteString(str);
 }
@@ -728,8 +769,8 @@ std::size_t WriteStringToFile(bool text_file, const std::string& filename, std::
 std::size_t ReadFileToString(bool text_file, const std::string& filename, std::string& str) {
     IOFile file(filename, text_file ? "r" : "rb");
 
-    if (!file)
-        return false;
+    if (!file.IsOpen())
+        return 0;
 
     str.resize(static_cast<u32>(file.GetSize()));
     return file.ReadArray(&str[0], str.size());
@@ -770,45 +811,155 @@ void SplitFilename83(const std::string& filename, std::array<char, 9>& short_nam
     }
 }
 
-IOFile::IOFile() {}
+std::vector<std::string> SplitPathComponents(std::string_view filename) {
+    std::string copy(filename);
+    std::replace(copy.begin(), copy.end(), '\\', '/');
+    std::vector<std::string> out;
 
-IOFile::IOFile(const std::string& filename, const char openmode[], int flags) {
-    Open(filename, openmode, flags);
+    std::stringstream stream(copy);
+    std::string item;
+    while (std::getline(stream, item, '/')) {
+        out.push_back(std::move(item));
+    }
+
+    return out;
+}
+
+std::string_view GetParentPath(std::string_view path) {
+    const auto name_bck_index = path.rfind('\\');
+    const auto name_fwd_index = path.rfind('/');
+    std::size_t name_index;
+
+    if (name_bck_index == std::string_view::npos || name_fwd_index == std::string_view::npos) {
+        name_index = std::min(name_bck_index, name_fwd_index);
+    } else {
+        name_index = std::max(name_bck_index, name_fwd_index);
+    }
+
+    return path.substr(0, name_index);
+}
+
+std::string_view GetPathWithoutTop(std::string_view path) {
+    if (path.empty()) {
+        return path;
+    }
+
+    while (path[0] == '\\' || path[0] == '/') {
+        path.remove_prefix(1);
+        if (path.empty()) {
+            return path;
+        }
+    }
+
+    const auto name_bck_index = path.find('\\');
+    const auto name_fwd_index = path.find('/');
+    return path.substr(std::min(name_bck_index, name_fwd_index) + 1);
+}
+
+std::string_view GetFilename(std::string_view path) {
+    const auto name_index = path.find_last_of("\\/");
+
+    if (name_index == std::string_view::npos) {
+        return {};
+    }
+
+    return path.substr(name_index + 1);
+}
+
+std::string_view GetExtensionFromFilename(std::string_view name) {
+    const std::size_t index = name.rfind('.');
+
+    if (index == std::string_view::npos) {
+        return {};
+    }
+
+    return name.substr(index + 1);
+}
+
+std::string_view RemoveTrailingSlash(std::string_view path) {
+    if (path.empty()) {
+        return path;
+    }
+
+    if (path.back() == '\\' || path.back() == '/') {
+        path.remove_suffix(1);
+        return path;
+    }
+
+    return path;
+}
+
+std::string SanitizePath(std::string_view path_, DirectorySeparator directory_separator) {
+    std::string path(path_);
+    char type1 = directory_separator == DirectorySeparator::BackwardSlash ? '/' : '\\';
+    char type2 = directory_separator == DirectorySeparator::BackwardSlash ? '\\' : '/';
+
+    if (directory_separator == DirectorySeparator::PlatformDefault) {
+#ifdef _WIN32
+        type1 = '/';
+        type2 = '\\';
+#endif
+    }
+
+    std::replace(path.begin(), path.end(), type1, type2);
+
+    auto start = path.begin();
+#ifdef _WIN32
+    // allow network paths which start with a double backslash (e.g. \\server\share)
+    if (start != path.end())
+        ++start;
+#endif
+    path.erase(std::unique(start, path.end(),
+                           [type2](char c1, char c2) { return c1 == type2 && c2 == type2; }),
+               path.end());
+    return std::string(RemoveTrailingSlash(path));
+}
+
+IOFile::IOFile() = default;
+
+IOFile::IOFile(const std::string& filename, const char openmode[], int flags)
+    : filename(filename), openmode(openmode), flags(flags) {
+    Open();
 }
 
 IOFile::~IOFile() {
     Close();
 }
 
-IOFile::IOFile(IOFile&& other) {
+IOFile::IOFile(IOFile&& other) noexcept {
     Swap(other);
 }
 
-IOFile& IOFile::operator=(IOFile&& other) {
+IOFile& IOFile::operator=(IOFile&& other) noexcept {
     Swap(other);
     return *this;
 }
 
-void IOFile::Swap(IOFile& other) {
+void IOFile::Swap(IOFile& other) noexcept {
     std::swap(m_file, other.m_file);
     std::swap(m_good, other.m_good);
+    std::swap(filename, other.filename);
+    std::swap(openmode, other.openmode);
+    std::swap(flags, other.flags);
 }
 
-bool IOFile::Open(const std::string& filename, const char openmode[], int flags) {
+bool IOFile::Open() {
     Close();
+
 #ifdef _WIN32
     if (flags != 0) {
         m_file = _wfsopen(Common::UTF8ToUTF16W(filename).c_str(),
                           Common::UTF8ToUTF16W(openmode).c_str(), flags);
+        m_good = m_file != nullptr;
     } else {
-        _wfopen_s(&m_file, Common::UTF8ToUTF16W(filename).c_str(),
-                  Common::UTF8ToUTF16W(openmode).c_str());
+        m_good = _wfopen_s(&m_file, Common::UTF8ToUTF16W(filename).c_str(),
+                           Common::UTF8ToUTF16W(openmode).c_str()) == 0;
     }
 #else
-    m_file = fopen(filename.c_str(), openmode);
+    m_file = std::fopen(filename.c_str(), openmode.c_str());
+    m_good = m_file != nullptr;
 #endif
 
-    m_good = IsOpen();
     return m_good;
 }
 
@@ -838,7 +989,7 @@ u64 IOFile::Tell() const {
     if (IsOpen())
         return ftello(m_file);
 
-    return -1;
+    return std::numeric_limits<u64>::max();
 }
 
 bool IOFile::Flush() {
@@ -846,6 +997,36 @@ bool IOFile::Flush() {
         m_good = false;
 
     return m_good;
+}
+
+std::size_t IOFile::ReadImpl(void* data, std::size_t length, std::size_t data_size) {
+    if (!IsOpen()) {
+        m_good = false;
+        return std::numeric_limits<std::size_t>::max();
+    }
+
+    if (length == 0) {
+        return 0;
+    }
+
+    DEBUG_ASSERT(data != nullptr);
+
+    return std::fread(data, data_size, length, m_file);
+}
+
+std::size_t IOFile::WriteImpl(const void* data, std::size_t length, std::size_t data_size) {
+    if (!IsOpen()) {
+        m_good = false;
+        return std::numeric_limits<std::size_t>::max();
+    }
+
+    if (length == 0) {
+        return 0;
+    }
+
+    DEBUG_ASSERT(data != nullptr);
+
+    return std::fwrite(data, data_size, length, m_file);
 }
 
 bool IOFile::Resize(u64 size) {

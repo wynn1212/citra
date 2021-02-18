@@ -1,5 +1,9 @@
 # CMake 3.8 required for 17 to be a valid value for CXX_STANDARD
 cmake_minimum_required(VERSION 3.8)
+if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.15)
+    # Don't override the warning flags in MSVC:
+    cmake_policy(SET CMP0092 NEW)
+endif ()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/externals/cmake-modules")
 include(DownloadExternals)
@@ -34,6 +38,10 @@ option(USE_DISCORD_PRESENCE "Enables Discord Rich Presence" OFF)
 CMAKE_DEPENDENT_OPTION(ENABLE_MF "Use Media Foundation decoder (preferred over FFmpeg)" ON "WIN32" OFF)
 
 CMAKE_DEPENDENT_OPTION(COMPILE_WITH_DWARF "Add DWARF debugging information" ON "MINGW" OFF)
+
+option(USE_SYSTEM_BOOST "Use the system Boost libs (instead of the bundled ones)" OFF)
+
+CMAKE_DEPENDENT_OPTION(ENABLE_FDK "Use FDK AAC decoder" OFF "NOT ENABLE_FFMPEG_AUDIO_DECODER;NOT ENABLE_MF" OFF)
 
 if(NOT EXISTS ${PROJECT_SOURCE_DIR}/.git/hooks/pre-commit)
     message(STATUS "Copying pre-commit hook")
@@ -118,21 +126,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # set up output paths for executable binaries
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/$<CONFIG>)
 
 
 # System imported libraries
 # ======================
-
-find_package(Boost 1.66.0 QUIET)
-if (NOT Boost_FOUND)
-    message(STATUS "Boost 1.66.0 or newer not found, falling back to externals")
-
-    set(BOOST_ROOT "${PROJECT_SOURCE_DIR}/externals/boost")
-    set(Boost_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/externals/boost")
-    set(Boost_NO_SYSTEM_PATHS OFF)
-    find_package(Boost QUIET REQUIRED)
-endif()
 
 # Prefer the -pthread flag on Linux.
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -142,7 +140,7 @@ if (ENABLE_SDL2)
     if (CITRA_USE_BUNDLED_SDL2)
         # Detect toolchain and platform
         if ((MSVC_VERSION GREATER_EQUAL 1910 AND MSVC_VERSION LESS 1930) AND ARCHITECTURE_x86_64)
-            set(SDL2_VER "SDL2-2.0.8")
+            set(SDL2_VER "SDL2-2.0.12")
         else()
             message(FATAL_ERROR "No bundled SDL2 binaries for your toolchain. Disable CITRA_USE_BUNDLED_SDL2 and provide your own.")
         endif()
@@ -188,7 +186,7 @@ if (ENABLE_QT)
         set(QT_PREFIX_HINT)
     endif()
 
-    find_package(Qt5 REQUIRED COMPONENTS Widgets OpenGL Multimedia ${QT_PREFIX_HINT})
+    find_package(Qt5 REQUIRED COMPONENTS Widgets Multimedia ${QT_PREFIX_HINT})
 
     if (ENABLE_QT_TRANSLATION)
         find_package(Qt5 REQUIRED COMPONENTS LinguistTools ${QT_PREFIX_HINT})
@@ -209,7 +207,11 @@ if (ENABLE_FFMPEG)
         endif()
     endif()
 
-    find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil swscale swresample)
+    if (ENABLE_FFMPEG_VIDEO_DUMPER)
+        find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil swscale swresample)
+    else()
+        find_package(FFmpeg REQUIRED COMPONENTS avcodec)
+    endif()
     if ("${FFmpeg_avcodec_VERSION}" VERSION_LESS "57.48.101")
         message(FATAL_ERROR "Found version for libavcodec is too low. The required version is at least 57.48.101 (included in FFmpeg 3.1 and later).")
     endif()
@@ -219,6 +221,12 @@ if (ENABLE_FFMPEG_VIDEO_DUMPER)
     add_definitions(-DENABLE_FFMPEG_VIDEO_DUMPER)
 endif()
 
+if (ENABLE_FDK)
+    find_library(FDK_AAC fdk-aac DOC "The path to fdk_aac library")
+    if(FDK_AAC STREQUAL "FDK_AAC-NOTFOUND")
+        message(FATAL_ERROR "fdk_aac library not found.")
+    endif()
+endif()
 # Platform-specific library requirements
 # ======================================
 
@@ -242,7 +250,7 @@ endif()
 # against all the src files. This should be used before making a pull request.
 # =======================================================================
 
-set(CLANG_FORMAT_POSTFIX "-6.0")
+set(CLANG_FORMAT_POSTFIX "-10")
 find_program(CLANG_FORMAT
     NAMES clang-format${CLANG_FORMAT_POSTFIX}
           clang-format
@@ -253,7 +261,7 @@ if (NOT CLANG_FORMAT)
         message(STATUS "Clang format not found! Downloading...")
         set(CLANG_FORMAT "${PROJECT_BINARY_DIR}/externals/clang-format${CLANG_FORMAT_POSTFIX}.exe")
         file(DOWNLOAD
-            https://github.com/yuzu-emu/ext-windows-bin/raw/master/clang-format${CLANG_FORMAT_POSTFIX}.exe
+            https://github.com/citra-emu/ext-windows-bin/raw/master/clang-format${CLANG_FORMAT_POSTFIX}.exe
             "${CLANG_FORMAT}" SHOW_PROGRESS
             STATUS DOWNLOAD_SUCCESS)
         if (NOT DOWNLOAD_SUCCESS EQUAL 0)
@@ -327,8 +335,21 @@ git_describe(GIT_DESC --always --long --dirty)
 git_branch_name(GIT_BRANCH)
 get_timestamp(BUILD_DATE)
 
+if (NOT USE_SYSTEM_BOOST)
+    add_definitions( -DBOOST_ALL_NO_LIB )
+endif()
+
 enable_testing()
 add_subdirectory(externals)
+
+# Boost
+if (USE_SYSTEM_BOOST)
+    find_package(Boost 1.70.0 COMPONENTS serialization REQUIRED)
+else()
+    add_library(Boost::boost ALIAS boost)
+    add_library(Boost::serialization ALIAS boost_serialization)
+endif()
+
 add_subdirectory(src)
 add_subdirectory(dist/installer)
 

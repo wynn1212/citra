@@ -90,10 +90,11 @@ public:
     GLenum logic_op; // GL_LOGIC_OP_MODE
 
     // 3 texture units - one for each that is used in PICA fragment shader emulation
-    struct {
+    struct TextureUnit {
         GLuint texture_2d; // GL_TEXTURE_BINDING_2D
         GLuint sampler;    // GL_SAMPLER_BINDING
-    } texture_units[3];
+    };
+    std::array<TextureUnit, 3> texture_units;
 
     struct {
         GLuint texture_cube; // GL_TEXTURE_BINDING_CUBE_MAP
@@ -144,6 +145,8 @@ public:
 
     std::array<bool, 2> clip_distance; // GL_CLIP_DISTANCE
 
+    GLuint renderbuffer; // GL_RENDERBUFFER_BINDING
+
     OpenGLState();
 
     /// Get the currently active OpenGL state
@@ -162,6 +165,7 @@ public:
     OpenGLState& ResetBuffer(GLuint handle);
     OpenGLState& ResetVertexArray(GLuint handle);
     OpenGLState& ResetFramebuffer(GLuint handle);
+    OpenGLState& ResetRenderbuffer(GLuint handle);
 
 private:
     static OpenGLState cur_state;

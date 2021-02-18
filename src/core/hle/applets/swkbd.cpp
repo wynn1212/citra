@@ -84,7 +84,7 @@ ResultCode SoftwareKeyboard::ReceiveParameter(Service::APT::MessageParameter con
     }
 
     default: {
-        LOG_ERROR(Service_APT, "unsupported signal {}", static_cast<u32>(parameter.signal));
+        LOG_ERROR(Service_APT, "unsupported signal {}", parameter.signal);
         UNIMPLEMENTED();
         // TODO(Subv): Find the right error code
         return ResultCode(-1);
@@ -98,9 +98,6 @@ ResultCode SoftwareKeyboard::StartImpl(Service::APT::AppletStartupParameter cons
 
     memcpy(&config, parameter.buffer.data(), parameter.buffer.size());
     text_memory = std::static_pointer_cast<Kernel::SharedMemory, Kernel::Object>(parameter.object);
-
-    // TODO(Subv): Verify if this is the correct behavior
-    memset(text_memory->GetPointer(), 0, text_memory->GetSize());
 
     DrawScreenKeyboard();
 
@@ -121,7 +118,8 @@ void SoftwareKeyboard::Update() {
     using namespace Frontend;
     const KeyboardData& data = frontend_applet->ReceiveData();
     std::u16string text = Common::UTF8ToUTF16(data.text);
-    memcpy(text_memory->GetPointer(), text.c_str(), text.length() * sizeof(char16_t));
+    // Include a null terminator
+    memcpy(text_memory->GetPointer(), text.c_str(), (text.length() + 1) * sizeof(char16_t));
     switch (config.num_buttons_m1) {
     case SoftwareKeyboardButtonConfig::SingleButton:
         config.return_code = SoftwareKeyboardResult::D0Click;
@@ -145,8 +143,7 @@ void SoftwareKeyboard::Update() {
         config.return_code = SoftwareKeyboardResult::None;
         break;
     default:
-        LOG_CRITICAL(Applet_SWKBD, "Unknown button config {}",
-                     static_cast<u32>(config.num_buttons_m1));
+        LOG_CRITICAL(Applet_SWKBD, "Unknown button config {}", config.num_buttons_m1);
         UNREACHABLE();
     }
 
@@ -196,15 +193,8 @@ Frontend::KeyboardConfig SoftwareKeyboard::ToFrontendConfig(
     frontend_config.max_text_length = config.max_text_length;
     frontend_config.max_digits = config.max_digits;
     frontend_config.hint_text = Common::UTF16BufferToUTF8(config.hint_text);
-    frontend_config.has_custom_button_text =
-        !std::all_of(config.button_text.begin(), config.button_text.end(),
-                     [](std::array<u16, HLE::Applets::MAX_BUTTON_TEXT_LEN + 1> x) {
-                         return std::all_of(x.begin(), x.end(), [](u16 x) { return x == 0; });
-                     });
-    if (frontend_config.has_custom_button_text) {
-        for (const auto& text : config.button_text) {
-            frontend_config.button_text.push_back(Common::UTF16BufferToUTF8(text));
-        }
+    for (const auto& text : config.button_text) {
+        frontend_config.button_text.push_back(Common::UTF16BufferToUTF8(text));
     }
     frontend_config.filters.prevent_digit =
         static_cast<bool>(config.filter_flags & SoftwareKeyboardFilter::Digits);

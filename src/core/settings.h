@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 #include "common/common_types.h"
-#include "core/hle/service/cam/cam.h"
+#include "core/hle/service/cam/cam_params.h"
 
 namespace Settings {
 
@@ -32,7 +32,7 @@ enum class MicInputType {
     Static,
 };
 
-enum class StereoRenderOption { Off, SideBySide, Anaglyph };
+enum class StereoRenderOption { Off, SideBySide, Anaglyph, Interlaced, ReverseInterlaced };
 
 namespace NativeButton {
 enum Values {
@@ -112,9 +112,16 @@ struct InputProfile {
     std::array<std::string, NativeAnalog::NumAnalogs> analogs;
     std::string motion_device;
     std::string touch_device;
+    bool use_touch_from_button;
+    int touch_from_button_map_index;
     std::string udp_input_address;
     u16 udp_input_port;
     u8 udp_pad_index;
+};
+
+struct TouchFromButtonMap {
+    std::string name;
+    std::vector<std::string> buttons;
 };
 
 struct Values {
@@ -125,9 +132,11 @@ struct Values {
     InputProfile current_input_profile;       ///< The current input profile
     int current_input_profile_index;          ///< The current input profile index
     std::vector<InputProfile> input_profiles; ///< The list of input profiles
+    std::vector<TouchFromButtonMap> touch_from_button_maps;
 
     // Core
     bool use_cpu_jit;
+    int cpu_clock_percentage;
 
     // Data Storage
     bool use_virtual_sd;
@@ -141,15 +150,19 @@ struct Values {
     bool use_gles;
     bool use_hw_renderer;
     bool use_hw_shader;
+    bool separable_shader;
+    bool use_disk_shader_cache;
     bool shaders_accurate_mul;
     bool use_shader_jit;
     u16 resolution_factor;
-    bool vsync_enabled;
-    bool use_frame_limit;
+    bool use_frame_limit_alternate;
     u16 frame_limit;
+    u16 frame_limit_alternate;
+    std::string texture_filter_name;
 
     LayoutOption layout_option;
     bool swap_screen;
+    bool upright_screen;
     bool custom_layout;
     u16 custom_top_left;
     u16 custom_top_top;
@@ -169,6 +182,12 @@ struct Values {
 
     bool filter_mode;
     std::string pp_shader_name;
+
+    bool dump_textures;
+    bool custom_textures;
+    bool preload_textures;
+
+    bool use_vsync_new;
 
     // Audio
     bool enable_dsp_lle;
@@ -197,6 +216,18 @@ struct Values {
     std::string web_api_url;
     std::string citra_username;
     std::string citra_token;
+
+    // Video Dumping
+    std::string output_format;
+    std::string format_options;
+
+    std::string video_encoder;
+    std::string video_encoder_options;
+    u64 video_bitrate;
+
+    std::string audio_encoder;
+    std::string audio_encoder_options;
+    u64 audio_bitrate;
 } extern values;
 
 // a special value for Values::region_value indicating that citra will automatically select a region

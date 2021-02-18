@@ -4,10 +4,12 @@
 
 #include <algorithm>
 #include "common/alignment.h"
+#include "common/memory_ref.h"
 #include "core/core.h"
 #include "core/hle/ipc.h"
 #include "core/hle/kernel/handle_table.h"
 #include "core/hle/kernel/ipc.h"
+#include "core/hle/kernel/ipc_debugger/recorder.h"
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/memory.h"
 #include "core/hle/kernel/process.h"
@@ -16,13 +18,15 @@
 
 namespace Kernel {
 
-ResultCode TranslateCommandBuffer(Memory::MemorySystem& memory, std::shared_ptr<Thread> src_thread,
+ResultCode TranslateCommandBuffer(Kernel::KernelSystem& kernel, Memory::MemorySystem& memory,
+                                  std::shared_ptr<Thread> src_thread,
                                   std::shared_ptr<Thread> dst_thread, VAddr src_address,
                                   VAddr dst_address,
                                   std::vector<MappedBufferContext>& mapped_buffer_context,
                                   bool reply) {
-    auto& src_process = src_thread->owner_process;
-    auto& dst_process = dst_thread->owner_process;
+    auto src_process = src_thread->owner_process.lock();
+    auto dst_process = dst_thread->owner_process.lock();
+    ASSERT(src_process && dst_process);
 
     IPC::Header header;
     // TODO(Subv): Replace by Memory::Read32 when possible.
@@ -36,6 +40,13 @@ ResultCode TranslateCommandBuffer(Memory::MemorySystem& memory, std::shared_ptr<
 
     std::array<u32, IPC::COMMAND_BUFFER_LENGTH> cmd_buf;
     memory.ReadBlock(*src_process, src_address, cmd_buf.data(), command_size * sizeof(u32));
+
+    const bool should_record = kernel.GetIPCRecorder().IsEnabled();
+
+    std::vector<u32> untranslated_cmdbuf;
+    if (should_record) {
+        untranslated_cmdbuf = std::vector<u32>{cmd_buf.begin(), cmd_buf.begin() + command_size};
+    }
 
     std::size_t i = untranslated_size;
     while (i < command_size) {
@@ -62,7 +73,7 @@ ResultCode TranslateCommandBuffer(Memory::MemorySystem& memory, std::shared_ptr<
                 if (handle == CurrentThread) {
                     object = src_thread;
                 } else if (handle == CurrentProcess) {
-                    object = SharedFrom(src_process);
+                    object = src_process;
                 } else if (handle != 0) {
                     object = src_process->handle_table.GetGeneric(handle);
                     if (descriptor == IPC::DescriptorType::MoveHandle) {
@@ -184,28 +195,29 @@ ResultCode TranslateCommandBuffer(Memory::MemorySystem& memory, std::shared_ptr<
             // TODO(Subv): Perform permission checks.
 
             // Reserve a page of memory before the mapped buffer
-            auto reserve_buffer = std::make_unique<u8[]>(Memory::PAGE_SIZE);
+            std::shared_ptr<BackingMem> reserve_buffer =
+                std::make_shared<BufferMem>(Memory::PAGE_SIZE);
             dst_process->vm_manager.MapBackingMemoryToBase(
-                Memory::IPC_MAPPING_VADDR, Memory::IPC_MAPPING_SIZE, reserve_buffer.get(),
+                Memory::IPC_MAPPING_VADDR, Memory::IPC_MAPPING_SIZE, reserve_buffer,
                 Memory::PAGE_SIZE, Kernel::MemoryState::Reserved);
 
-            auto buffer = std::make_unique<u8[]>(num_pages * Memory::PAGE_SIZE);
-            memory.ReadBlock(*src_process, source_address, buffer.get() + page_offset, size);
+            std::shared_ptr<BackingMem> buffer =
+                std::make_shared<BufferMem>(num_pages * Memory::PAGE_SIZE);
+            memory.ReadBlock(*src_process, source_address, buffer->GetPtr() + page_offset, size);
 
             // Map the page(s) into the target process' address space.
             target_address =
                 dst_process->vm_manager
                     .MapBackingMemoryToBase(Memory::IPC_MAPPING_VADDR, Memory::IPC_MAPPING_SIZE,
-                                            buffer.get(), num_pages * Memory::PAGE_SIZE,
-                                            Kernel::MemoryState::Shared)
+                                            buffer, buffer->GetSize(), Kernel::MemoryState::Shared)
                     .Unwrap();
 
             cmd_buf[i++] = target_address + page_offset;
 
             // Reserve a page of memory after the mapped buffer
             dst_process->vm_manager.MapBackingMemoryToBase(
-                Memory::IPC_MAPPING_VADDR, Memory::IPC_MAPPING_SIZE, reserve_buffer.get(),
-                Memory::PAGE_SIZE, Kernel::MemoryState::Reserved);
+                Memory::IPC_MAPPING_VADDR, Memory::IPC_MAPPING_SIZE, reserve_buffer,
+                reserve_buffer->GetSize(), Kernel::MemoryState::Reserved);
 
             mapped_buffer_context.push_back({permissions, size, source_address,
                                              target_address + page_offset, std::move(buffer),
@@ -215,6 +227,17 @@ ResultCode TranslateCommandBuffer(Memory::MemorySystem& memory, std::shared_ptr<
         }
         default:
             UNIMPLEMENTED_MSG("Unsupported handle translation: {:#010X}", descriptor);
+        }
+    }
+
+    if (should_record) {
+        std::vector<u32> translated_cmdbuf{cmd_buf.begin(), cmd_buf.begin() + command_size};
+        if (reply) {
+            kernel.GetIPCRecorder().SetReplyInfo(dst_thread, std::move(untranslated_cmdbuf),
+                                                 std::move(translated_cmdbuf));
+        } else {
+            kernel.GetIPCRecorder().SetRequestInfo(src_thread, std::move(untranslated_cmdbuf),
+                                                   std::move(translated_cmdbuf), dst_thread);
         }
     }
 

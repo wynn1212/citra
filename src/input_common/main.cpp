@@ -10,6 +10,8 @@
 #include "input_common/main.h"
 #include "input_common/motion_emu.h"
 #include "input_common/sdl/sdl.h"
+#include "input_common/sdl/sdl_impl.h"
+#include "input_common/touch_from_button.h"
 #include "input_common/udp/udp.h"
 
 namespace InputCommon {
@@ -26,6 +28,8 @@ void Init() {
                                                 std::make_shared<AnalogFromButton>());
     motion_emu = std::make_shared<MotionEmu>();
     Input::RegisterFactory<Input::MotionDevice>("motion_emu", motion_emu);
+    Input::RegisterFactory<Input::TouchDevice>("touch_from_button",
+                                               std::make_shared<TouchFromButtonFactory>());
 
     sdl = SDL::Init();
 
@@ -38,6 +42,7 @@ void Shutdown() {
     Input::UnregisterFactory<Input::AnalogDevice>("analog_from_button");
     Input::UnregisterFactory<Input::MotionDevice>("motion_emu");
     motion_emu.reset();
+    Input::UnregisterFactory<Input::TouchDevice>("touch_from_button");
     sdl.reset();
     udp.reset();
 }
@@ -70,6 +75,18 @@ std::string GenerateAnalogParamFromKeys(int key_up, int key_down, int key_left, 
         {"modifier_scale", std::to_string(modifier_scale)},
     };
     return circle_pad_param.Serialize();
+}
+
+Common::ParamPackage GetSDLControllerButtonBindByGUID(const std::string& guid, int port,
+                                                      int button) {
+    return dynamic_cast<SDL::SDLState*>(sdl.get())->GetSDLControllerButtonBindByGUID(
+        guid, port, static_cast<Settings::NativeButton::Values>(button));
+}
+
+Common::ParamPackage GetSDLControllerAnalogBindByGUID(const std::string& guid, int port,
+                                                      int analog) {
+    return dynamic_cast<SDL::SDLState*>(sdl.get())->GetSDLControllerAnalogBindByGUID(
+        guid, port, static_cast<Settings::NativeAnalog::Values>(analog));
 }
 
 void ReloadInputDevices() {

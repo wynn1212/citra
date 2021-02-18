@@ -7,6 +7,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 #include "common/common_types.h"
 #include "core/hle/service/service.h"
@@ -244,7 +245,7 @@ public:
             (this->*function)(ctx, id);
         }
 
-    private:
+    protected:
         std::shared_ptr<Module> cfg;
     };
 
@@ -383,12 +384,13 @@ public:
 
     /**
      * Generates a new random console unique id.
-     * @param random_number a random generated 16bit number stored at 0x90002, used for generating
-     * the
-     * console_id
-     * @param console_id the randomly created console id
+     *
+     * @returns A pair containing a random number and a random console ID.
+     *
+     * @note The random number is a random generated 16bit number stored at 0x90002, used for
+     *       generating the console ID.
      */
-    void GenerateConsoleUniqueId(u32& random_number, u64& console_id);
+    std::pair<u32, u64> GenerateConsoleUniqueId() const;
 
     /**
      * Sets the random_number and the  console unique id in the config savegame.
@@ -426,6 +428,10 @@ private:
     std::array<u8, CONFIG_SAVEFILE_SIZE> cfg_config_file_buffer;
     std::unique_ptr<FileSys::ArchiveBackend> cfg_system_save_data_archive;
     u32 preferred_region_code = 0;
+
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int);
+    friend class boost::serialization::access;
 };
 
 std::shared_ptr<Module> GetModule(Core::System& system);
@@ -436,3 +442,5 @@ void InstallInterfaces(Core::System& system);
 std::string GetConsoleIdHash(Core::System& system);
 
 } // namespace Service::CFG
+
+BOOST_CLASS_EXPORT_KEY(Service::CFG::Module)

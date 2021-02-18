@@ -4,12 +4,15 @@
 
 #include <cryptopp/aes.h>
 #include <cryptopp/modes.h>
+#include "common/archives.h"
 #include "common/logging/log.h"
 #include "core/core.h"
 #include "core/hle/ipc_helpers.h"
 #include "core/hle/service/ps/ps_ps.h"
 #include "core/hw/aes/arithmetic128.h"
 #include "core/hw/aes/key.h"
+
+SERIALIZE_EXPORT_IMPL(Service::PS::PS_PS)
 
 namespace Service::PS {
 
@@ -39,8 +42,8 @@ constexpr std::array<u8, 10> KeyTypes{{
 
 void PS_PS::EncryptDecryptAes(Kernel::HLERequestContext& ctx) {
     IPC::RequestParser rp(ctx, 0x4, 8, 4);
-    u32 src_size = rp.Pop<u32>();
-    u32 dest_size = rp.Pop<u32>();
+    auto src_size = rp.Pop<u32>();
+    [[maybe_unused]] const auto dest_size = rp.Pop<u32>();
 
     using CryptoPP::AES;
     std::array<u8, AES::BLOCKSIZE> iv;
@@ -51,7 +54,7 @@ void PS_PS::EncryptDecryptAes(Kernel::HLERequestContext& ctx) {
     auto source = rp.PopMappedBuffer();
     auto destination = rp.PopMappedBuffer();
 
-    LOG_DEBUG(Service_PS, "called algorithm={} key_type={}", static_cast<u8>(algorithm), key_type);
+    LOG_DEBUG(Service_PS, "called algorithm={} key_type={}", algorithm, key_type);
 
     // TODO(zhaowenlan1779): Tests on a real 3DS shows that no error is returned in this case
     // and encrypted data is actually returned, but the key used is unknown.

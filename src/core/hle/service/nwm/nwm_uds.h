@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 #include <boost/optional.hpp>
+#include <boost/serialization/export.hpp>
 #include "common/common_types.h"
 #include "common/swap.h"
 #include "core/hle/service/service.h"
@@ -127,6 +128,8 @@ public:
     explicit NWM_UDS(Core::System& system);
     ~NWM_UDS();
 
+    class ThreadCallback;
+
 private:
     Core::System& system;
 
@@ -225,6 +228,18 @@ private:
      *      2 : Channel of the current WiFi network connection.
      */
     void SetApplicationData(Kernel::HLERequestContext& ctx);
+
+    /**
+     * NWM_UDS::GetApplicationData service function.
+     * Loads the application data from the current beacon.
+     *  Inputs:
+     *      1 : Data size.
+     *  Outputs:
+     *      0 : Return header
+     *      1 : Result of function, always 0
+     *      2 : Actual data size
+     */
+    void GetApplicationData(Kernel::HLERequestContext& ctx);
 
     /**
      * NWM_UDS::Bind service function.
@@ -521,6 +536,14 @@ private:
     struct Node {
         bool connected;
         u16 node_id;
+
+    private:
+        template <class Archive>
+        void serialize(Archive& ar, const unsigned int) {
+            ar& connected;
+            ar& node_id;
+        }
+        friend class boost::serialization::access;
     };
 
     std::map<MacAddress, Node> node_map;
@@ -543,6 +566,14 @@ private:
 
     // List of the last <MaxBeaconFrames> beacons received from the network.
     std::list<Network::WifiPacket> received_beacons;
+
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int);
+    friend class boost::serialization::access;
 };
 
 } // namespace Service::NWM
+
+SERVICE_CONSTRUCT(Service::NWM::NWM_UDS)
+BOOST_CLASS_EXPORT_KEY(Service::NWM::NWM_UDS)
+BOOST_CLASS_EXPORT_KEY(Service::NWM::NWM_UDS::ThreadCallback)

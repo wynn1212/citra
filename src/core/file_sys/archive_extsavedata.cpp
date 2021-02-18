@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 #include <fmt/format.h>
+#include "common/archives.h"
 #include "common/common_types.h"
 #include "common/file_util.h"
 #include "common/logging/log.h"
@@ -18,6 +19,8 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // FileSys namespace
+
+SERIALIZE_EXPORT_IMPL(FileSys::ArchiveFactory_ExtSaveData)
 
 namespace FileSys {
 
@@ -77,6 +80,8 @@ public:
         static constexpr u64 IPCDelayNanoseconds(3085068);
         return IPCDelayNanoseconds;
     }
+
+    SERIALIZE_DELAY_GENERATOR
 };
 
 /**
@@ -162,6 +167,14 @@ public:
         }
         return SaveDataArchive::CreateFile(path, size);
     }
+
+private:
+    ExtSaveDataArchive() = default;
+    template <class Archive>
+    void serialize(Archive& ar, const unsigned int) {
+        ar& boost::serialization::base_object<SaveDataArchive>(*this);
+    }
+    friend class boost::serialization::access;
 };
 
 struct ExtSaveDataArchivePath {
@@ -172,7 +185,7 @@ struct ExtSaveDataArchivePath {
 
 static_assert(sizeof(ExtSaveDataArchivePath) == 12, "Incorrect path size");
 
-std::string GetExtSaveDataPath(const std::string& mount_point, const Path& path) {
+std::string GetExtSaveDataPath(std::string_view mount_point, const Path& path) {
     std::vector<u8> vec_data = path.AsBinary();
 
     ExtSaveDataArchivePath path_data;
@@ -181,16 +194,16 @@ std::string GetExtSaveDataPath(const std::string& mount_point, const Path& path)
     return fmt::format("{}{:08X}/{:08X}/", mount_point, path_data.save_high, path_data.save_low);
 }
 
-std::string GetExtDataContainerPath(const std::string& mount_point, bool shared) {
-    if (shared)
+std::string GetExtDataContainerPath(std::string_view mount_point, bool shared) {
+    if (shared) {
         return fmt::format("{}data/{}/extdata/", mount_point, SYSTEM_ID);
-
+    }
     return fmt::format("{}Nintendo 3DS/{}/{}/extdata/", mount_point, SYSTEM_ID, SDCARD_ID);
 }
 
-std::string GetExtDataPathFromId(const std::string& mount_point, u64 extdata_id) {
-    u32 high = static_cast<u32>(extdata_id >> 32);
-    u32 low = static_cast<u32>(extdata_id & 0xFFFFFFFF);
+std::string GetExtDataPathFromId(std::string_view mount_point, u64 extdata_id) {
+    const u32 high = static_cast<u32>(extdata_id >> 32);
+    const u32 low = static_cast<u32>(extdata_id & 0xFFFFFFFF);
 
     return fmt::format("{}{:08x}/{:08x}/", GetExtDataContainerPath(mount_point, false), high, low);
 }
@@ -297,3 +310,6 @@ void ArchiveFactory_ExtSaveData::WriteIcon(const Path& path, const u8* icon_data
 }
 
 } // namespace FileSys
+
+SERIALIZE_EXPORT_IMPL(FileSys::ExtSaveDataDelayGenerator)
+SERIALIZE_EXPORT_IMPL(FileSys::ExtSaveDataArchive)

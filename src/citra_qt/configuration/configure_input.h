@@ -10,15 +10,16 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <QKeyEvent>
 #include <QKeySequence>
 #include <QWidget>
 #include "common/param_package.h"
 #include "core/settings.h"
 #include "input_common/main.h"
-#include "ui_configure_input.h"
 
+class QKeyEvent;
+class QLabel;
 class QPushButton;
+class QSlider;
 class QString;
 class QTimer;
 
@@ -74,6 +75,10 @@ private:
     /// Analog inputs are also represented each with a single button, used to configure with an
     /// actual analog stick
     std::array<QPushButton*, Settings::NativeAnalog::NumAnalogs> analog_map_stick;
+    std::array<QSlider*, Settings::NativeAnalog::NumAnalogs>
+        analog_map_deadzone_and_modifier_slider;
+    std::array<QLabel*, Settings::NativeAnalog::NumAnalogs>
+        analog_map_deadzone_and_modifier_slider_label;
 
     static const std::array<std::string, ANALOG_SUB_BUTTONS_NUM> analog_sub_buttons;
 
@@ -92,6 +97,9 @@ private:
 
     /// Generates list of all used keys
     QList<QKeySequence> GetUsedKeyboardKeys();
+
+    void MapFromButton(const Common::ParamPackage& params);
+    void AutoMap();
 
     /// Restore all buttons to their default values.
     void RestoreDefaults();
